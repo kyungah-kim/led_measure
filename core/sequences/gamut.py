@@ -35,13 +35,15 @@ class GamutSequence:
         self,
         is_hdr: bool,
         callback: Callable[[str, MeasureResult], None],
+        skip_init: bool = False,
     ) -> Dict[str, MeasureResult]:
         """Measure R, G, B, White, Black in sequence.
 
         Parameters
         ----------
-        is_hdr:   Apply HDR output settings.
-        callback: Called with (color_name, MeasureResult) after each measurement.
+        is_hdr:     Apply HDR output settings.
+        callback:   Called with (color_name, MeasureResult) after each measurement.
+        skip_init:  Skip set_sdr/set_hdr if caller already handled it.
 
         Returns dict mapping colour name -> MeasureResult.
         """
@@ -52,10 +54,11 @@ class GamutSequence:
         if meter is None or not meter.is_connected:
             raise RuntimeError("Meter is not connected")
 
-        if is_hdr:
-            gen.set_hdr(True)
-        else:
-            gen.set_sdr()
+        if not skip_init:
+            if is_hdr:
+                gen.set_hdr(True)
+            else:
+                gen.set_sdr()
 
         results: Dict[str, MeasureResult] = {}
 

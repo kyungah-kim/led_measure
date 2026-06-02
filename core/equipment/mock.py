@@ -1,122 +1,81 @@
-"""Mock meter and generator for UI/output testing without physical hardware."""
+"""Mock meter and generator for offline testing / demos."""
 from __future__ import annotations
 
+import math
 import random
 import time
 
 from .base import GeneratorBase, MeasureResult, MeterBase, PatternConfig, PatternInfo
-from ..colorimetry import xy_to_cct_duv
-
-# Realistic display primary chromaticities (sRGB-like)
-_COLOR_XY: dict[str, tuple[float, float]] = {
-    "red":     (0.6400, 0.3300),
-    "green":   (0.3000, 0.6000),
-    "blue":    (0.1500, 0.0600),
-    "white":   (0.3127, 0.3290),
-    "black":   (0.3127, 0.3290),
-    "cyan":    (0.2250, 0.3295),
-    "magenta": (0.3950, 0.1650),
-    "yellow":  (0.4190, 0.5050),
-}
-
-# Peak luminance per colour at 100% APL (cd/m²)
-_COLOR_LV_PEAK: dict[str, float] = {
-    "red":     108.0,
-    "green":   367.0,
-    "blue":     35.0,
-    "white":   500.0,
-    "black":     0.008,
-    "cyan":    380.0,
-    "magenta": 130.0,
-    "yellow":  450.0,
-}
-
-
-def _xy_to_uv(x: float, y: float) -> tuple[float, float]:
-    d = -2 * x + 12 * y + 3
-    if d == 0:
-        return 0.0, 0.0
-    return 4 * x / d, 9 * y / d
-
-
-def _noise(val: float, pct: float = 0.003) -> float:
-    return val + random.gauss(0, abs(val) * pct + 1e-9)
 
 
 class MockMeter(MeterBase):
-    """Simulates CA-410 with realistic colour-dependent values.
-
-    Chromaticity changes per pattern colour; luminance scales with APL.
-    """
+    """Simulated colorimeter that returns plausible random values."""
 
     def __init__(self) -> None:
-        self._connected = False
-        self._current_pattern = PatternInfo(
-            type="window", apl_pct=10.0,
-            width_pct=31.6, height_pct=31.6, color="white"
-        )
+        self._connected = True
+        self._pattern: PatternInfo | None = None
 
     def connect(self, port: str) -> None:
-        time.sleep(0.05)
         self._connected = True
 
     def disconnect(self) -> None:
         self._connected = False
 
-    @property
-    def is_connected(self) -> bool:
-        return self._connected
-
     def set_current_pattern(self, info: PatternInfo) -> None:
-        self._current_pattern = info
+        self._pattern = info
 
     def measure(self) -> MeasureResult:
-        """Return a realistic measurement based on the current pattern.
+        time.sleep(0.05)  # simulate measurement delay
+        p = self._pattern
 
-        CA-410 integration time:
-          - Lv < 0.01  cd/m²  → ~3.0 s (very dark, long integration)
-          - Lv < 1.0   cd/m²  → ~2.0 s (dark, extended integration)
-          - Lv >= 1.0  cd/m²  → ~1.5 s (normal auto-range)
-        """
-        p = self._current_pattern
-        color = p.color.lower()
-
-        # Base chromaticity for this colour
-        base_x, base_y = _COLOR_XY.get(color, _COLOR_XY["white"])
-
-        # Add small chromaticity noise
-        x = max(0.01, min(0.85, _noise(base_x, 0.002)))
-        y = max(0.01, min(0.85, _noise(base_y, 0.002)))
-
-        # Luminance: peak × APL factor (with slight HDR boost)
-        peak = _COLOR_LV_PEAK.get(color, 500.0)
-        if p.is_hdr:
-            peak *= 2.0   # simple HDR luminance boost
-
-        apl_factor = p.apl_pct / 100.0
-        # Non-linear (gamma-like) APL-to-Lv relationship
-        lv_base = peak * (apl_factor ** 0.45) if color != "black" else peak
-        Lv = max(0.001, _noise(lv_base, 0.005))
-
-        # CA-410 integration time depends on luminance level
-        if Lv < 0.01:
-            time.sleep(3.0)
-        elif Lv < 1.0:
-            time.sleep(2.0)
+        # Base luminance depends on pattern colour / APL
+        if p is None:
+            base_lv = 300.0
+        elif p.color == "white":
+            base_lv = 300.0 * (p.apl_pct / 100.0) ** 0.5 if p.apl_pct else 300.0
+        elif p.color == "red":
+            base_lv = 90.0
+        elif p.color == "green":
+            base_lv = 180.0
+        elif p.color == "blue":
+            base_lv = 30.0
+        elif p.color == "black":
+            base_lv = 0.01
         else:
-            time.sleep(1.5)
+            base_lv = 100.0
 
-        # Derive XYZ from xyY
-        Y = Lv
-        X = (x / y) * Y if y > 0 else 0.0
-        Z = ((1 - x - y) / y) * Y if y > 0 else 0.0
+        if p and p.type in ("raster_window", "window") and p.color == "black":
+            # Black window — very low luminance
+            base_lv = random.uniform(0.008, 0.015)
+        else:
+            base_lv *= random.uniform(0.97, 1.03)
 
-        u_prime, v_prime = _xy_to_uv(x, y)
-        cct, duv = xy_to_cct_duv(x, y)
+        # Chromaticity
+        if p and p.color == "red":
+            x, y = 0.680 + random.gauss(0, 0.002), 0.320 + random.gauss(0, 0.002)
+        elif p and p.color == "green":
+            x, y = 0.265 + random.gauss(0, 0.002), 0.690 + random.gauss(0, 0.002)
+        elif p and p.color == "blue":
+            x, y = 0.150 + random.gauss(0, 0.002), 0.060 + random.gauss(0, 0.002)
+        elif p and p.color == "black":
+            x, y = 0.313 + random.gauss(0, 0.005), 0.329 + random.gauss(0, 0.005)
+        else:
+            x, y = 0.313 + random.gauss(0, 0.002), 0.329 + random.gauss(0, 0.002)
+
+        denom = -2 * x + 12 * y + 3
+        u_prime = 4 * x / denom if denom else 0.0
+        v_prime = 9 * y / denom if denom else 0.0
+
+        Y = base_lv
+        X = Y * x / y if y else 0.0
+        Z = Y * (1 - x - y) / y if y else 0.0
+
+        cct = 6500.0 + random.gauss(0, 50)
+        duv = random.gauss(0.0, 0.002)
 
         return MeasureResult(
             timestamp_ms=int(time.time() * 1000),
-            Lv=round(Lv, 4),
+            Lv=round(base_lv, 4),
             x=round(x, 4),
             y=round(y, 4),
             u_prime=round(u_prime, 4),
@@ -124,63 +83,44 @@ class MockMeter(MeterBase):
             X=round(X, 4),
             Y=round(Y, 4),
             Z=round(Z, 4),
-            cct=cct,
-            duv=duv,
-            pattern_info=self._current_pattern,
+            cct=round(cct, 1),
+            duv=round(duv, 5),
+            pattern_info=p or PatternInfo(
+                type="unknown", apl_pct=0.0, width_pct=0.0, height_pct=0.0, color="unknown"
+            ),
         )
-
-
-class MockGenerator(GeneratorBase):
-    """Simulates VG-876/VG-879 without actual hardware output.
-
-    Pattern stabilization delay (2 s) models the time for the TV panel
-    to respond to a new signal from the generator before the meter can
-    take a valid reading.
-    """
-
-    _STABILIZE_SEC = 2.0   # display stabilization after pattern change
-
-    def __init__(self) -> None:
-        self._connected = False
-        self._hdr = False
-        self._current: PatternConfig | None = None
-
-    def connect(self, port: str) -> None:
-        time.sleep(0.02)
-        self._connected = True
-
-    def disconnect(self) -> None:
-        self._connected = False
 
     @property
     def is_connected(self) -> bool:
         return self._connected
 
+
+class MockGenerator(GeneratorBase):
+    """Simulated pattern generator that does nothing but track state."""
+
+    def __init__(self) -> None:
+        self._connected = True
+        self._hdr = False
+        self._current_pattern: PatternConfig | None = None
+
+    def connect(self, port: str) -> None:
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
     def set_pattern(self, cfg: PatternConfig) -> None:
-        self._current = cfg
-        time.sleep(self._STABILIZE_SEC)
-
-    def show_full_field(self, r: int, g: int, b: int, bit_mode: int = 8) -> None:
-        self._current = PatternConfig(
-            type="full_field", color=f"rgb({r},{g},{b})",
-            r=r, g=g, b=b, bit_mode=bit_mode,
-        )
-        time.sleep(self._STABILIZE_SEC)
-
-    def show_window(self, w_pct: float, h_pct: float,
-                    fg_r: int = 255, fg_g: int = 255, fg_b: int = 255,
-                    bg_r: int = 0, bg_g: int = 0, bg_b: int = 0,
-                    bit_mode: int = 8) -> None:
-        self._current = PatternConfig(
-            type="window", color="white",
-            r=fg_r, g=fg_g, b=fg_b,
-            width_pct=w_pct, height_pct=h_pct,
-            bg_r=bg_r, bg_g=bg_g, bg_b=bg_b,
-        )
-        time.sleep(self._STABILIZE_SEC)
+        self._current_pattern = cfg
 
     def set_hdr(self, enabled: bool) -> None:
         self._hdr = enabled
 
     def set_sdr(self) -> None:
         self._hdr = False
+
+    def show_black(self) -> None:
+        pass
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected

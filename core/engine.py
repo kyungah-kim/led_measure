@@ -41,6 +41,14 @@ class MeasurementEngine:
 
         self.meter: Optional[MeterBase] = None
         self.generator: Optional[GeneratorBase] = None
+        self.auto_save_dir: str = ""  # 공통 자동 저장 폴더 (연결 패널에서 설정)
+
+        # ── 세션 데이터 (통합 파일 저장용) ──────────────────────────────────────
+        # 앱 실행 중 모든 측정 결과를 누적 보관.  패널 _on_finished 때마다 갱신.
+        self.session_swing:    Dict[str, Any] = {}   # "SDR_Vivid" → [MeasureResult]
+        self.session_loading:  Dict[str, Any] = {}   # "SDR_Vivid" → {apl → results}
+        self.session_gamut:    Dict[str, Any] = {}   # "SDR" / "HDR" → {color → result}
+        self.session_contrast: Dict[str, Any] = {}   # "SDR" / "HDR" → {side → result}
 
         # Shared lock for meter access across threads
         self.meter_lock = threading.Lock()
@@ -158,6 +166,8 @@ class MeasurementEngine:
         case: str = kwargs.get("case", "A")
         is_hdr: bool = kwargs.get("is_hdr", False)
         cooling_enabled: bool = kwargs.get("cooling_enabled", False)
+        cooling_apl_threshold: int = kwargs.get("cooling_apl_threshold", 10)
+        cooling_duration_sec: float = kwargs.get("cooling_duration_sec", 5.0)
         measurements_per_step: int = kwargs.get("measurements_per_step", 5)
         user_callback: Callable = kwargs.get("callback", lambda i, a, r: None)
 
@@ -181,6 +191,8 @@ class MeasurementEngine:
             cooling_enabled=cooling_enabled,
             callback=_cb,
             measurements_per_step=measurements_per_step,
+            cooling_duration_sec=cooling_duration_sec,
+            cooling_apl_threshold=cooling_apl_threshold,
         )
         self.on_progress("lum_loading", 1.0, results)
         return results
@@ -189,17 +201,25 @@ class MeasurementEngine:
         is_hdr: bool = kwargs.get("is_hdr", False)
         user_callback: Callable = kwargs.get("callback", lambda c, r: None)
 
-        # 5 colours total
+        # 6 steps total: 1 init + 5 colours
+        _TOTAL = 6
         completed = [0]
         seq = GamutSequence(self)
         self._current_seq = seq
 
         def _cb(color: str, result: MeasureResult) -> None:
             completed[0] += 1
-            self.on_progress("gamut", completed[0] / 5, {"color": color, "result": result})
+            self.on_progress("gamut", completed[0] / _TOTAL, {"color": color, "result": result})
             user_callback(color, result)
 
-        results = seq.run(is_hdr=is_hdr, callback=_cb)
+        # 초기화 단계를 progress에 반영
+        if is_hdr:
+            self.generator.set_hdr(True)
+        else:
+            self.generator.set_sdr()
+        self.on_progress("gamut", 1 / _TOTAL, {"color": None, "result": None})
+
+        results = seq.run(is_hdr=is_hdr, callback=_cb, skip_init=True)
         self.on_progress("gamut", 1.0, results)
         return results
 
@@ -207,8 +227,8 @@ class MeasurementEngine:
         is_hdr: bool = kwargs.get("is_hdr", False)
         user_callback: Callable = kwargs.get("callback", lambda s, r: None)
 
-        from .sequences.contrast import _APL_SIZES_PCT
-        total = len(_APL_SIZES_PCT)
+        from .sequences.contrast import _WIN_SIDES_PCT
+        total = 1 + len(_WIN_SIDES_PCT)  # full white + black window steps
         completed = [0]
         seq = ContrastSequence(self)
         self._current_seq = seq

@@ -32,7 +32,11 @@ _COOLING_APL_THRESHOLD = 10
 _COOLING_DURATION_SEC = 5.0
 
 # Default number of measurements per APL step
-_MEASUREMENTS_PER_STEP = 5
+_MEASUREMENTS_PER_STEP = 3
+
+# Interval between repeated measurements at the same APL (seconds).
+# Display is already stable — only need meter to clear its buffer between readings.
+_INTER_MEAS_SLEEP = 0.3
 
 
 def _apl_to_window_size(apl_pct: float) -> tuple[float, float]:
@@ -63,12 +67,13 @@ class LumLoadingSequence:
     def run(
         self,
         version: str,
-        case: str,
+        case: str,  # noqa: ARG002  (caller uses for labelling; sequence ignores)
         is_hdr: bool,
         cooling_enabled: bool,
         callback: Callable[[int, float, List[MeasureResult]], None],
         measurements_per_step: int = _MEASUREMENTS_PER_STEP,
         cooling_duration_sec: float = _COOLING_DURATION_SEC,
+        cooling_apl_threshold: int = _COOLING_APL_THRESHOLD,
     ) -> Dict[int, List[MeasureResult]]:
         """Execute the APL sweep for one case.
 
@@ -84,7 +89,7 @@ class LumLoadingSequence:
 
         Returns dict mapping APL% -> list of MeasureResult.
         """
-        steps = _STEP_VERSIONS.get(str(version))
+        steps = _STEP_VERSIONS.get(version)
         if steps is None:
             raise ValueError(f"Unknown version {version!r}. Choose '37', '10', or '2'.")
 
@@ -108,12 +113,10 @@ class LumLoadingSequence:
                 break
             w_pct, h_pct = _apl_to_window_size(float(apl))
 
-            # Optional cooling: show black before low-APL steps
-            if cooling_enabled and apl <= _COOLING_APL_THRESHOLD:
-                black_cfg = PatternConfig(
-                    type="full_field", color="black", r=0, g=0, b=0
-                )
-                gen.set_pattern(black_cfg)
+            # Optional cooling: 직통 블랙 (ALLCLR4+EXPDN4) — 타이밍 로드 없이 즉시 검정
+            if cooling_enabled and apl <= cooling_apl_threshold:
+                if hasattr(gen, "show_black"):
+                    gen.show_black()  # type: ignore[attr-defined]
                 time.sleep(cooling_duration_sec)
 
             # Output the target APL window pattern
@@ -139,7 +142,9 @@ class LumLoadingSequence:
                 meter.set_current_pattern(pattern_info)  # type: ignore[attr-defined]
 
             step_results: List[MeasureResult] = []
-            for _ in range(measurements_per_step):
+            for i in range(measurements_per_step):
+                if i > 0:
+                    time.sleep(_INTER_MEAS_SLEEP)
                 with self._engine.meter_lock:
                     result = meter.measure()
                 step_results.append(result)

@@ -107,6 +107,8 @@ class VgGenerator(GeneratorBase):
     def set_pattern(self, cfg: PatternConfig) -> None:
         if cfg.type == "full_field":
             self.show_full_field(cfg.r, cfg.g, cfg.b, cfg.bit_mode)
+        elif cfg.type == "raster_window":
+            self.show_white_raster_black_window(cfg.width_pct, cfg.bit_mode)
         elif cfg.type == "window":
             self.show_window_patch(
                 cfg.width_pct, cfg.height_pct,
@@ -191,6 +193,8 @@ class VgGenerator(GeneratorBase):
 
     def _reapply_last_pattern(self) -> None:
         if self._last_pattern is None:
+            # 이전 패턴 없음 → HDR/SDR 신호가 활성됐음을 보여주는 중간 회색 출력
+            self.show_full_field(128, 128, 128)
             return
         last_pattern = self._last_pattern
         self._last_pattern = None
@@ -211,7 +215,7 @@ class VgGenerator(GeneratorBase):
         장비 freeze 시: UI [장비 리셋] 버튼으로 복구 후 사용.
         """
         self._send(_build_frame(0x28, 0x60))  # ALLCLR4 [28H 60H]
-        time.sleep(0.3)
+        time.sleep(0.05)
 
     def reset(self) -> None:
         """장비 freeze/응답불량 시 초기 상태로 복귀한다.
@@ -223,6 +227,16 @@ class VgGenerator(GeneratorBase):
         self._load_init_pattern(sleep=2.0)
         self._is_hdr = False
         self._last_pattern = None
+
+    def show_black(self) -> dict:
+        """즉시 블랙 출력 — _prepare_pattern_base() 를 거치지 않는 직통 경로.
+
+        쿨링처럼 '지금 바로 화면을 끄고 싶을 때' 사용.
+        ALLCLR4 + EXPDN4(0,0) 만 전송해 타이밍 로드 없이 즉시 블랙.
+        """
+        self._send(_build_frame(0x28, 0x60))        # ALLCLR4: 모든 플레인 클리어
+        time.sleep(0.1)
+        return self._send(_build_frame(0x24, 0x20, 0, 0))  # EXPDN4(0,0)
 
     def show_center_align(self) -> dict:
         """ABC 센터 정렬 패턴: VG-879 ABC 버튼 + ㅁ + X + R+G+B 동시 활성.
@@ -261,10 +275,10 @@ class VgGenerator(GeneratorBase):
             # 처음이거나 이전이 다른 패턴 타입 → 전체 화면 창 등록
             self._reset_window_memory()                                                 # ALLCLR4
             self._send(_build_frame(0x28, 0x61, 0, 0, _SCREEN_W - 1, _SCREEN_H - 1))  # WINDOW4: 전체
-            time.sleep(0.2)
+            time.sleep(0.1)
 
         self._send(_build_frame(0x28, 0x62, r, g, b, bit_mode))                        # WINCOL4: 색상 (즉시 전환)
-        time.sleep(0.1)
+        time.sleep(0.05)
         return self._send(_build_frame(0x24, 0x20, 0, 0))                              # EXPDN4(0,0)
 
     def show_crosshair(self, bit_mode: int = 8) -> dict:
@@ -287,6 +301,48 @@ class VgGenerator(GeneratorBase):
         self._send(_build_frame(0x28, 0x62, r, g, b, bit_mode))                      # WINCOL4(white): 전체 창 적용
         time.sleep(0.2)
         return self._send(_build_frame(0x24, 0x20, 0, 0))                             # EXPDN4(0,0)
+
+    def show_white_raster_black_window(
+        self,
+        side_pct: float,
+        bit_mode: int = 8,
+    ) -> dict:
+        """White Raster + centered Black Window. (명암비 측정용)
+
+        확인된 시퀀스 (test_raster.py):
+          ALLCLR4
+          → SPT4(fg=white) + SPT4(bg=black) + SPTS4(0,1,2,10) + EXPDN4(9999,0)
+          → WINDOW4(center, side_pct) + WINCOL4(black) + EXPDN4(0,0)
+
+        side_pct: 검은 창 한 변 크기 (% of screen).  100%=전체, 50%=절반 등.
+        """
+        self._prepare_pattern_base()
+        r, g, b, bm = self._scale_rgb_for_output(255, 255, 255, bit_mode)
+
+        # ── White Raster ──────────────────────────────────────────────────────
+        self._reset_window_memory()                                          # ALLCLR4
+        self._send(_build_frame(0x20, 0x2C, 9999,  1, r, g, b, bm))        # SPT4 fg=white
+        time.sleep(0.05)
+        self._send(_build_frame(0x20, 0x2C, 9999, 18, 0, 0, 0, 8))         # SPT4 bg=black
+        time.sleep(0.05)
+        self._send(_build_frame(0x20, 0x2A, 9999, 0, 1, 2, 10))            # SPTS4(0,1,2,10)
+        time.sleep(0.05)
+        self._send(_build_frame(0x24, 0x20, 9999, 0))                       # EXPDN4(9999,0)
+        time.sleep(0.15)
+
+        # ── Black Center Window ───────────────────────────────────────────────
+        w  = max(1, int(_SCREEN_W * side_pct / 100))
+        h  = max(1, int(_SCREEN_H * side_pct / 100))
+        x1 = (_SCREEN_W - w) // 2
+        y1 = (_SCREEN_H - h) // 2
+        x2 = x1 + w - 1
+        y2 = y1 + h - 1
+
+        self._send(_build_frame(0x28, 0x61, x1, y1, x2, y2))               # WINDOW4(center)
+        time.sleep(0.05)
+        self._send(_build_frame(0x28, 0x62, 0, 0, 0, 8))                   # WINCOL4(black)
+        time.sleep(0.05)
+        return self._send(_build_frame(0x24, 0x20, 0, 0))                   # EXPDN4(0,0)
 
     def show_window_patch(
         self,
@@ -327,9 +383,9 @@ class VgGenerator(GeneratorBase):
         if bg_r == 0 and bg_g == 0 and bg_b == 0:
             # 어두운 배경: 중앙 창만 등록, 배경은 ALLCLR4 기본 블랙
             self._send(_build_frame(0x28, 0x61, x1, y1, x2, y2))            # WINDOW4: 중앙
-            time.sleep(0.2)
+            time.sleep(0.03)
             self._send(_build_frame(0x28, 0x62, r, g, b, bit_mode))         # WINCOL4: 창 색
-            time.sleep(0.2)
+            time.sleep(0.03)
         else:
             # 밝은 배경: 4 스트립으로 배경 등록, 중앙은 미등록(블랙)
             # WINCOL4는 전역이므로 마지막 1회로 모든 스트립에 적용됨

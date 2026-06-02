@@ -31,3 +31,6 @@ Thumbs.db
 
 # 로그
 *.log
+
+# 측정 결과 xlsx
+*.xlsx

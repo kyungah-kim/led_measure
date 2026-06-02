@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import statistics
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import openpyxl
 
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QScatterSeries, QValueAxis
-from PySide6.QtCore import QMargins, Qt, Slot
+from PySide6.QtCore import QMargins, QRectF, Qt, Slot
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,36 +42,101 @@ from core.export import ExcelExporter
 from core.gamut_utils import DCI_P3_UV, BT2020_UV, calc_gamut_stats
 from .worker import ConnectWorker, MeasurementWorker, wire_worker_cleanup
 
+
+def _save_all_session(engine: MeasurementEngine) -> str:
+    """모든 세션 데이터를 {brand}_{model}_all.xlsx 한 파일에 자동 저장."""
+    if not engine.auto_save_dir:
+        return ""
+    brand = engine.brand or "brand"
+    model = engine.model_name or "model"
+    path = os.path.join(engine.auto_save_dir, f"{brand}_{model}_all.xlsx")
+    try:
+        ExcelExporter().export_all_session(
+            brand=brand, model=model,
+            session_swing=engine.session_swing,
+            session_loading=engine.session_loading,
+            session_gamut=engine.session_gamut,
+            session_contrast=engine.session_contrast,
+            file_path=path,
+        )
+    except Exception as e:
+        print(f"[_save_all_session] 오류: {e}")
+    return path
+
 _DARK_STYLE = """
 QMainWindow, QWidget { background: #f5f6fa; color: #1a1d2e; font-size: 13px; }
 QGroupBox { border: 1px solid #d0d3e0; border-radius: 6px; margin-top: 8px; padding: 8px;
             background: #ffffff; }
 QGroupBox::title { color: #6b7080; font-size: 11px; text-transform: uppercase; }
+
 QPushButton { background: #ffffff; border: 1px solid #c8ccd8; border-radius: 5px;
-              padding: 6px 14px; color: #1a1d2e; }
-QPushButton:hover { background: #eef0f8; }
+              padding: 6px 14px; color: #1a1d2e; font-weight: 500; }
+QPushButton:hover { background: #eef0f8; border-color: #a8b0cc; }
+QPushButton:pressed { background: #dde2f0; }
 QPushButton#primary { background: #4f8ef7; border-color: #4f8ef7; color: white; font-weight: bold; }
-QPushButton#primary:hover { background: #3a7ae8; }
-QPushButton#danger { background: #e74c3c; border-color: #e74c3c; color: white; }
-QPushButton#warning { background: #e67e22; border-color: #e67e22; color: white; }
+QPushButton#primary:hover { background: #3a7ae8; border-color: #3a7ae8; }
+QPushButton#primary:pressed { background: #2d6fd6; }
+QPushButton#danger  { background: #e74c3c; border-color: #e74c3c; color: white; font-weight: bold; }
+QPushButton#danger:hover  { background: #d44030; }
+QPushButton#warning { background: #e67e22; border-color: #e67e22; color: white; font-weight: bold; }
+QPushButton#warning:hover { background: #cf6d1a; }
 QPushButton#success { background: #27ae60; border-color: #27ae60; color: white; font-weight: bold; }
-QPushButton:disabled { color: #aab0c0; border-color: #dde0ea; }
-QComboBox, QLineEdit { background: #ffffff; border: 1px solid #c8ccd8;
-                       border-radius: 4px; padding: 5px 8px; color: #1a1d2e; }
+QPushButton:disabled { color: #aab0c0; border-color: #dde0ea; background: #f5f6fa; }
+
+QComboBox { background: #ffffff; border: 1px solid #c8ccd8; border-radius: 4px;
+            padding: 5px 8px; color: #1a1d2e; }
+QComboBox:hover { border-color: #4f8ef7; }
+QComboBox::drop-down { border: none; width: 20px; }
+QComboBox QAbstractItemView { background: #ffffff; border: 1px solid #c8ccd8;
+                               selection-background-color: #eef0f8; }
+QLineEdit { background: #ffffff; border: 1px solid #c8ccd8; border-radius: 4px;
+            padding: 5px 8px; color: #1a1d2e; }
+QLineEdit:focus { border-color: #4f8ef7; }
+
 QListWidget { background: #ffffff; border: 1px solid #d0d3e0; border-radius: 4px; }
-QListWidget::item { padding: 8px 12px; }
-QListWidget::item:selected { background: rgba(79,142,247,0.12); color: #2d6fd6; border-left: 3px solid #4f8ef7; }
-QProgressBar { background: #e8eaf0; border: 1px solid #c8ccd8; border-radius: 3px; height: 8px; }
+QListWidget::item { padding: 6px 12px; }
+QListWidget::item:hover { background: #f0f2f8; }
+QListWidget::item:selected { background: rgba(79,142,247,0.12); color: #2d6fd6;
+                              border-left: 3px solid #4f8ef7; }
+
+QProgressBar { background: #e8eaf0; border: 1px solid #d0d3e0; border-radius: 3px; height: 8px; }
 QProgressBar::chunk { background: #4f8ef7; border-radius: 3px; }
-QTableWidget { background: #ffffff; gridline-color: #dde0ea; border: 1px solid #d0d3e0; }
+
+QTableWidget { background: #ffffff; gridline-color: #eaecf4; border: 1px solid #d0d3e0;
+               alternate-background-color: #f8f9fc; }
+QTableWidget::item:hover { background: #eef0f8; }
+QTableWidget::item:selected { background: rgba(79,142,247,0.15); color: #1a1d2e; }
 QHeaderView::section { background: #f0f2f8; color: #6b7080; border: none;
-                        border-bottom: 1px solid #d0d3e0; padding: 5px 8px;
-                        font-size: 11px; font-weight: bold; }
+                       border-bottom: 2px solid #d0d3e0; padding: 6px 8px;
+                       font-size: 11px; font-weight: bold; letter-spacing: 0.03em; }
+QHeaderView::section:hover { background: #e8eaf4; }
+
 QCheckBox { spacing: 6px; }
-QLabel#status_ok { color: #27ae60; font-weight: bold; }
-QLabel#status_err { color: #e74c3c; font-weight: bold; }
-QLabel#muted { color: #8890a8; font-size: 12px; }
+QCheckBox::indicator { width: 15px; height: 15px; border-radius: 3px;
+                       border: 1px solid #c8ccd8; background: #ffffff; }
+QCheckBox::indicator:checked { background: #4f8ef7; border-color: #4f8ef7; }
+
+QSpinBox { background: #ffffff; border: 1px solid #c8ccd8; border-radius: 4px;
+           padding: 4px 6px; color: #1a1d2e; }
+QSpinBox:focus { border-color: #4f8ef7; }
+
 QSplitter::handle { background: #d0d3e0; }
+QSplitter::handle:horizontal { width: 4px; }
+QSplitter::handle:vertical   { height: 4px; }
+QSplitter::handle:hover { background: #4f8ef7; }
+
+QScrollBar:vertical { background: #f5f6fa; width: 8px; border-radius: 4px; }
+QScrollBar::handle:vertical { background: #c8ccd8; border-radius: 4px; min-height: 20px; }
+QScrollBar::handle:vertical:hover { background: #a0a8c0; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QScrollBar:horizontal { background: #f5f6fa; height: 8px; border-radius: 4px; }
+QScrollBar::handle:horizontal { background: #c8ccd8; border-radius: 4px; min-width: 20px; }
+QScrollBar::handle:horizontal:hover { background: #a0a8c0; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
+
+QLabel#status_ok  { color: #27ae60; font-weight: bold; }
+QLabel#status_err { color: #e74c3c; font-weight: bold; }
+QLabel#muted      { color: #8890a8; font-size: 12px; }
 """
 
 
@@ -96,8 +162,8 @@ class ConnectionPanel(QGroupBox):
         info_form = QFormLayout(info_box)
         info_form.setContentsMargins(8, 4, 8, 4)
         info_form.setSpacing(4)
-        self._brand_edit = QLineEdit("Samsung")
-        self._model_edit = QLineEdit("QN65S95D")
+        self._brand_edit = QLineEdit("입력")
+        self._model_edit = QLineEdit("입력")
         self._brand_edit.setMinimumWidth(140)
         self._model_edit.setMinimumWidth(140)
         self._brand_edit.textChanged.connect(self._sync_info)
@@ -169,26 +235,33 @@ class ConnectionPanel(QGroupBox):
 
         root.addLayout(top_row)
 
-        # ── 하단 행: Mock 버튼 (추후 제거 예정, 초록/기본/빨강으로 구분) ────────
-        mock_row = QHBoxLayout()
-        mock_row.setSpacing(4)
-        self._btn_mock_meter = QPushButton("Mock 미터")
-        self._btn_mock_meter.setObjectName("success")
-        self._btn_mock_meter.clicked.connect(self._connect_mock_meter)
-        self._btn_mock = QPushButton("Mock 전체")
-        self._btn_mock.clicked.connect(self._connect_mock)
+        # ── 하단 행: 포트 스캔 / 자동 저장 폴더 / 전체 해제 ──────────────
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(4)
         self._btn_dis_all = QPushButton("전체 해제")
         self._btn_dis_all.setObjectName("danger")
         self._btn_dis_all.clicked.connect(self._disconnect_all)
-        mock_row.addWidget(btn_scan)
-        mock_row.addStretch()
-        mock_row.addWidget(self._btn_mock_meter)
-        mock_row.addWidget(self._btn_mock)
-        mock_row.addWidget(self._btn_dis_all)
-        root.addLayout(mock_row)
+        bottom_row.addWidget(btn_scan)
+        bottom_row.addSpacing(12)
+        bottom_row.addWidget(QLabel("자동 저장 폴더:"))
+        self._save_dir_edit = QLineEdit()
+        self._save_dir_edit.setPlaceholderText("측정 완료 시 자동 저장할 폴더")
+        self._save_dir_edit.setReadOnly(True)
+        self._save_dir_edit.setMinimumWidth(220)
+        bottom_row.addWidget(self._save_dir_edit, stretch=1)
+        btn_folder = QPushButton("📁")
+        btn_folder.setFixedWidth(32)
+        btn_folder.clicked.connect(self._pick_save_dir)
+        bottom_row.addWidget(btn_folder)
+        bottom_row.addSpacing(12)
+        bottom_row.addWidget(self._btn_dis_all)
+        root.addLayout(bottom_row)
 
-        # 시작 시 포트 목록 채우기
+        # 시작 시 포트 목록 채우기 + 자동 저장 폴더 초기값 = 실행 폴더
         self._scan_ports()
+        default_dir = os.path.dirname(os.path.abspath(__file__))
+        self._engine.auto_save_dir = default_dir
+        self._save_dir_edit.setText(default_dir)
 
     def _scan_ports(self) -> None:
         """시리얼 포트를 스캔해 두 콤보박스를 갱신한다."""
@@ -199,10 +272,18 @@ class ConnectionPanel(QGroupBox):
             current = combo.currentText()
             combo.clear()
             combo.addItems(ports)
-            # 이전 선택 포트가 아직 존재하면 유지
             idx = combo.findText(current)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
+
+    def _pick_save_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "자동 저장 폴더 선택",
+            self._engine.auto_save_dir or os.path.expanduser("~"),
+        )
+        if folder:
+            self._engine.auto_save_dir = folder
+            self._save_dir_edit.setText(folder)
 
     def _sync_info(self) -> None:
         self._engine.brand = self._brand_edit.text().strip()
@@ -299,37 +380,6 @@ class ConnectionPanel(QGroupBox):
         self._btn_gen_dis.setEnabled(False)
         self._btn_gen_reset.setEnabled(False)
 
-    def _connect_mock_meter(self) -> None:
-        from core.equipment.mock import MockMeter
-        m = MockMeter()
-        m.connect("MOCK")
-        self._engine.meter = m
-        self._engine.brand = self._brand_edit.text().strip() or "Samsung"
-        self._engine.model_name = self._model_edit.text().strip() or "QN65S95D"
-        self._meter_status.setText("Mock 연결됨")
-        self._meter_status.setStyleSheet("color:#d4820a;font-weight:bold;")
-        self._btn_meter.setEnabled(False)
-        self._btn_meter_dis.setEnabled(True)
-
-    def _connect_mock(self) -> None:
-        from core.equipment.mock import MockMeter, MockGenerator
-        m = MockMeter()
-        m.connect("MOCK")
-        g = MockGenerator()
-        g.connect("MOCK")
-        self._engine.meter = m
-        self._engine.generator = g
-        self._engine.brand = self._brand_edit.text().strip() or "Samsung"
-        self._engine.model_name = self._model_edit.text().strip() or "QN65S95D"
-        self._meter_status.setText("Mock 연결됨")
-        self._meter_status.setStyleSheet("color:#d4820a;font-weight:bold;")
-        self._gen_status.setText("Mock 연결됨")
-        self._gen_status.setStyleSheet("color:#d4820a;font-weight:bold;")
-        self._btn_meter.setEnabled(False)
-        self._btn_meter_dis.setEnabled(True)
-        self._btn_gen.setEnabled(False)
-        self._btn_gen_dis.setEnabled(True)
-
     def _disconnect_all(self) -> None:
         self._disconnect_meter()
         self._disconnect_generator()
@@ -345,10 +395,10 @@ class CenterAlignPanel(QWidget):
         self._engine = engine
         self._worker: Optional[MeasurementWorker] = None
         layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignTop)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         title = QLabel("🎯 센터 맞추기")
-        title.setStyleSheet("font-size:16px;font-weight:bold;margin-bottom:4px;")
+        title.setStyleSheet("font-size:15px;font-weight:bold;")
         layout.addWidget(title)
         desc = QLabel("패턴 제너레이터에서 ABC 센터 정렬 패턴을 출력합니다.\n"
                       "측정기 렌즈가 화면 정중앙을 향하도록 조정 후 [OK]를 누르세요.")
@@ -411,26 +461,39 @@ class CenterAlignPanel(QWidget):
 # Luminance Swing Panel
 # ---------------------------------------------------------------------------
 
+_SWING_CASE_COLORS = {"Vivid": "#e74c3c", "Standard": "#4f8ef7", "Cinema": "#27ae60"}
+
+
+_SWING_CASE_ORDER = ["Vivid", "Standard", "Cinema"]
+
+
 class LumSwingPanel(QWidget):
     def __init__(self, engine: MeasurementEngine, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._engine = engine
         self._worker: Optional[MeasurementWorker] = None
-        self._series: Dict[str, QLineSeries] = {}
-        self._rows: List[MeasureResult] = []
+        # "SDR_Vivid", "HDR_Standard" 등 키로 결과 누적
+        self._all_data: Dict[str, List[MeasureResult]] = {}
+        # 현재 측정 중인 키
+        self._current_key: str = ""
+        # 범례 순서 고정: 초기화 시 Vivid→Standard→Cinema 순으로 미리 생성
+        # {case: QLineSeries}
+        self._sdr_series: Dict[str, QLineSeries] = {}
+        self._hdr_series: Dict[str, QLineSeries] = {}
 
         layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        title = QLabel("📈 휘도 스윙 (Luminance Swing)")
-        title.setStyleSheet("font-size:16px;font-weight:bold;margin-bottom:4px;")
-        layout.addWidget(title)
-
+        # ── 컨트롤 한 줄 ────────────────────────────────────────────────
         ctrl = QHBoxLayout()
+        title = QLabel("📈 휘도 스윙")
+        title.setStyleSheet("font-size:15px;font-weight:bold;")
+        ctrl.addWidget(title)
         ctrl.addWidget(QLabel("PSM:"))
         self._case_combo = QComboBox()
         self._case_combo.addItems(["Vivid", "Standard", "Cinema"])
         ctrl.addWidget(self._case_combo)
-        self._hdr_check = QCheckBox("HDR 자동 전환")
+        self._hdr_check = QCheckBox("HDR")
         self._hdr_check.setChecked(False)
         self._hdr_check.stateChanged.connect(self._on_hdr_toggled)
         ctrl.addWidget(self._hdr_check)
@@ -443,66 +506,154 @@ class LumSwingPanel(QWidget):
         self._btn_stop.setEnabled(False)
         self._btn_stop.clicked.connect(self._stop)
         ctrl.addWidget(self._btn_stop)
+        self._btn_clear = QPushButton("🗑 초기화")
+        self._btn_clear.clicked.connect(self._clear)
+        ctrl.addWidget(self._btn_clear)
         self._btn_export = QPushButton("💾  Excel 저장")
         self._btn_export.clicked.connect(self._export)
         ctrl.addWidget(self._btn_export)
         ctrl.addStretch()
         layout.addLayout(ctrl)
 
+        # ── 프로그레스 + 상태 (다음 줄) ─────────────────────────────────
+        prog_row = QHBoxLayout()
         self._progress = QProgressBar()
-        layout.addWidget(self._progress)
-
-        # Chart
-        self._chart = QChart()
-        self._chart.setTitle("BPL Swing")
-        self._chart.setBackgroundBrush(QColor("#ffffff"))
-        self._chart.setTitleBrush(QColor("#1a1d2e"))
-        self._axis_x = QValueAxis()
-        self._axis_x.setTitleText("측정 #")
-        self._axis_x.setLabelsBrush(QColor("#6b7080"))
-        self._axis_x.setTitleBrush(QColor("#6b7080"))
-        self._axis_y = QValueAxis()
-        self._axis_y.setTitleText("Lv (cd/m²)")
-        self._axis_y.setLabelsBrush(QColor("#6b7080"))
-        self._axis_y.setTitleBrush(QColor("#6b7080"))
-        self._chart.addAxis(self._axis_x, Qt.AlignBottom)
-        self._chart.addAxis(self._axis_y, Qt.AlignLeft)
-        self._chart.legend().hide()
-        chart_view = QChartView(self._chart)
-        chart_view.setRenderHint(QPainter.Antialiasing)
-        chart_view.setMinimumHeight(280)
-        chart_view.setStyleSheet("background: #ffffff;")
-        layout.addWidget(chart_view)
-
-        self._status_label = QLabel("")
+        self._progress.setFixedHeight(10)
+        prog_row.addWidget(self._progress)
+        self._status_label = QLabel("대기 중")
         self._status_label.setObjectName("muted")
-        layout.addWidget(self._status_label)
+        prog_row.addWidget(self._status_label)
+        prog_row.addStretch()
+        layout.addLayout(prog_row)
 
-        # Table (last 10 rows)
-        self._table = QTableWidget(0, 6)
-        self._table.setHorizontalHeaderLabels(["#", "Lv (cd/m²)", "x", "y", "u'", "v'"])
-        self._table.setMaximumHeight(180)
+        # ── SDR 차트 | HDR 차트 (좌우 분할) ─────────────────────────────
+        def _make_chart(title: str):
+            chart = QChart()
+            chart.setTitle(title)
+            chart.setBackgroundBrush(QColor("#ffffff"))
+
+            # 타이틀 폰트 작게
+            title_font = chart.titleFont()
+            title_font.setPointSize(10)
+            chart.setTitleFont(title_font)
+            chart.setTitleBrush(QColor("#1a1d2e"))
+
+            # 범례 폰트 작게
+            legend = chart.legend()
+            legend.setVisible(True)
+            legend.setLabelColor(QColor("#1a1d2e"))
+            legend_font = legend.font()
+            legend_font.setPointSize(9)
+            legend.setFont(legend_font)
+
+            # 여백 최소화
+            chart.setMargins(QMargins(2, 2, 2, 2))
+
+            # X축
+            ax = QValueAxis()
+            ax.setTitleText("측정 #")
+            ax.setLabelFormat("%d")
+            ax.setLabelsBrush(QColor("#6b7080"))
+            ax.setTitleBrush(QColor("#6b7080"))
+            ax_font = ax.labelsFont()
+            ax_font.setPointSize(8)
+            ax.setLabelsFont(ax_font)
+            ax_title_font = ax.titleFont()
+            ax_title_font.setPointSize(8)
+            ax.setTitleFont(ax_title_font)
+
+            # Y축
+            ay = QValueAxis()
+            ay.setTitleText("Lv (cd/m²)")
+            ay.setLabelFormat("%d")
+            ay.setLabelsBrush(QColor("#6b7080"))
+            ay.setTitleBrush(QColor("#6b7080"))
+            ay.setLabelsFont(ax_font)
+            ay.setTitleFont(ax_title_font)
+
+            chart.addAxis(ax, Qt.AlignBottom)
+            chart.addAxis(ay, Qt.AlignLeft)
+            view = QChartView(chart)
+            view.setRenderHint(QPainter.Antialiasing)
+            view.setMinimumHeight(320)
+            view.setStyleSheet("background: #ffffff;")
+            return chart, ax, ay, view
+
+        (self._chart_sdr, self._ax_x_sdr, self._ax_y_sdr, view_sdr) = _make_chart("SDR")
+        (self._chart_hdr, self._ax_x_hdr, self._ax_y_hdr, view_hdr) = _make_chart("HDR")
+
+        # ── 시리즈를 Vivid→Standard→Cinema 순서로 미리 생성 (범례 순서 고정) ──
+        def _make_series(case: str, chart: QChart, ax_x: QValueAxis, ax_y: QValueAxis) -> QLineSeries:
+            s = QLineSeries()
+            s.setName(case)
+            pen = s.pen()
+            pen.setColor(QColor(_SWING_CASE_COLORS[case]))
+            pen.setWidth(2)
+            s.setPen(pen)
+            chart.addSeries(s)
+            s.attachAxis(ax_x)
+            s.attachAxis(ax_y)
+            return s
+
+        for _case in _SWING_CASE_ORDER:
+            self._sdr_series[_case] = _make_series(
+                _case, self._chart_sdr, self._ax_x_sdr, self._ax_y_sdr)
+            self._hdr_series[_case] = _make_series(
+                _case, self._chart_hdr, self._ax_x_hdr, self._ax_y_hdr)
+
+        chart_split = QSplitter(Qt.Horizontal)
+        chart_split.addWidget(view_sdr)
+        chart_split.addWidget(view_hdr)
+        chart_split.setStretchFactor(0, 1)
+        chart_split.setStretchFactor(1, 1)
+        chart_split.setMaximumHeight(520)
+        layout.addWidget(chart_split)
+
+        # ── Lv 피벗 테이블: 행=#, 열=모드(SDR_Vivid 등) ──────────────────
+        self._table = QTableWidget(0, 1)
+        self._table.setAlternatingRowColors(True)
+        self._table.setHorizontalHeaderLabels(["#"])
+        self._table.setFixedHeight(300)  # 테이블 크기150 → 300으로 조정
         layout.addWidget(self._table)
+        layout.addStretch()
+
+    # ── 차트 헬퍼 ────────────────────────────────────────────────────────
+
+    def _get_axes(self, is_hdr: bool):
+        if is_hdr:
+            return self._ax_x_hdr, self._ax_y_hdr
+        return self._ax_x_sdr, self._ax_y_sdr
+
+    def _get_series(self, case: str, is_hdr: bool) -> QLineSeries:
+        return (self._hdr_series if is_hdr else self._sdr_series)[case]
+
+    def _clear(self) -> None:
+        self._all_data.clear()
+        self._current_key = ""
+        # 시리즈 데이터만 삭제 — 차트에서 제거하지 않아 범례 순서 유지
+        for s in list(self._sdr_series.values()) + list(self._hdr_series.values()):
+            s.clear()
+        # 축 범위 초기화
+        for ax in (self._ax_x_sdr, self._ax_x_hdr):
+            ax.setRange(0, 10)
+        for ay in (self._ax_y_sdr, self._ax_y_hdr):
+            ay.setRange(0, 100)
+        self._table.setRowCount(0)
+        self._table.setColumnCount(1)
+        self._table.setHorizontalHeaderLabels(["#"])
+        self._status_label.setText("초기화됨")
+
+    # ── 실행 / 중지 ──────────────────────────────────────────────────────
 
     def _run(self) -> None:
-        case_text = self._case_combo.currentText()
-        case = case_text[0]
+        case = self._case_combo.currentText()
         is_hdr = self._hdr_check.isChecked()
-        self._rows.clear()
-        # fresh series
-        series = QLineSeries()
-        series.setName(f"Case {case}")
-        pen = series.pen()
-        pen.setColor(QColor("#4f8ef7"))
-        pen.setWidth(2)
-        series.setPen(pen)
-        self._chart.removeAllSeries()
-        self._chart.addSeries(series)
-        series.attachAxis(self._axis_x)
-        series.attachAxis(self._axis_y)
-        self._series = {case: series}
-        self._axis_x.setRange(0, 30)
-        self._axis_y.setRange(0, 600)
+        mode = "HDR" if is_hdr else "SDR"
+        self._current_key = f"{mode}_{case}"
+
+        # 재측정: 해당 시리즈 데이터만 초기화 (범례 순서 그대로 유지)
+        self._get_series(case, is_hdr).clear()
+        self._all_data[self._current_key] = []
 
         self._worker = MeasurementWorker(self._engine, "lum_swing",
                                           case=case, is_hdr=is_hdr)
@@ -513,6 +664,7 @@ class LumSwingPanel(QWidget):
         self._worker.start()
         self._btn_run.setEnabled(False)
         self._btn_stop.setEnabled(True)
+        self._status_label.setText(f"{mode} {case} 측정 중...")
 
     def _stop(self) -> None:
         self._engine.stop_sequence()
@@ -550,21 +702,35 @@ class LumSwingPanel(QWidget):
         worker.start()
         self._hdr_worker = worker
 
-    def _export(self) -> None:
-        if not self._rows:
-            QMessageBox.information(self, "알림", "저장할 데이터가 없습니다.")
+    def _auto_save(self) -> None:
+        if not self._engine.auto_save_dir or not self._all_data:
             return
-        case = self._case_combo.currentText().split()[0].lower()
-        mode = "HDR" if self._hdr_check.isChecked() else "SDR"
         brand = self._engine.brand or "brand"
         model = self._engine.model_name or "model"
-        default_name = f"lum_swing_{mode}_{case}_{brand}_{model}.xlsx"
-        path, _ = QFileDialog.getSaveFileName(self, "Excel 저장", default_name,
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"lum_swing_{brand}_{model}_{ts}.xlsx"
+        path = os.path.join(self._engine.auto_save_dir, filename)
+        try:
+            ExcelExporter().export_lum_swing(
+                self._all_data, self._engine.brand, self._engine.model_name,
+                file_path=path,
+            )
+            self._status_label.setText(f"완료  |  저장: {path}")
+        except Exception as e:
+            QMessageBox.warning(self, "자동 저장 실패", str(e))
+
+    def _export(self) -> None:
+        if not self._all_data:
+            QMessageBox.information(self, "알림", "저장할 데이터가 없습니다.")
+            return
+        brand = self._engine.brand or "brand"
+        model = self._engine.model_name or "model"
+        path, _ = QFileDialog.getSaveFileName(self, "Excel 저장",
+                                               f"lum_swing_{brand}_{model}.xlsx",
                                                "Excel (*.xlsx)")
         if path:
             ExcelExporter().export_lum_swing(
-                {case: self._rows},
-                self._engine.brand, self._engine.model_name,
+                self._all_data, self._engine.brand, self._engine.model_name,
                 file_path=path,
             )
             QMessageBox.information(self, "저장 완료", f"저장됨: {path}")
@@ -572,26 +738,36 @@ class LumSwingPanel(QWidget):
     @Slot(str, float, object)
     def _on_progress(self, _step: str, pct: float, data: Any) -> None:
         self._progress.setValue(int(pct * 100))
-        if isinstance(data, MeasureResult):
-            self._rows.append(data)
-            case = self._case_combo.currentText()[0]
-            series = self._series.get(case)
-            if series:
-                n = len(self._rows)
-                series.append(float(n), data.Lv)
-                self._axis_x.setMax(max(self._axis_x.max(), float(n) + 2))
-                self._axis_y.setMax(max(self._axis_y.max(), data.Lv * 1.15))
-            self._update_table()
-            self._status_label.setText(
-                f"측정 중 — #{len(self._rows)}  Lv={data.Lv:.3f}  x={data.x:.4f}  y={data.y:.4f}"
-            )
+        if not isinstance(data, MeasureResult):
+            return
+        key = self._current_key
+        self._all_data.setdefault(key, []).append(data)
+        rows = self._all_data[key]
+        n = len(rows)
+
+        is_hdr = key.startswith("HDR")
+        case = key.split("_", 1)[1]
+        series = self._get_series(case, is_hdr)
+        ax_x, ax_y = self._get_axes(is_hdr)
+        series.append(float(n), data.Lv)
+        ax_x.setMax(max(ax_x.max(), float(n) + 2))
+        ax_y.setMax(max(ax_y.max(), data.Lv * 1.15))
+
+        self._update_table(key, data, n)
+        self._status_label.setText(f"{key} #{n}  Lv={data.Lv:.3f} cd/m²")
 
     @Slot(object)
     def _on_finished(self, _result: Any) -> None:
         self._progress.setValue(100)
-        self._status_label.setText(f"완료 — {len(self._rows)}건 측정")
+        key = self._current_key
+        n = len(self._all_data.get(key, []))
+        self._status_label.setText(f"{key} 완료 — {n}건")
         self._btn_run.setEnabled(True)
         self._btn_stop.setEnabled(False)
+        self._engine.session_swing[key] = list(self._all_data.get(key, []))
+        path = _save_all_session(self._engine)
+        if path:
+            self._status_label.setText(f"{key} 완료 — {n}건  |  저장: {path}")
 
     @Slot(str)
     def _on_error(self, msg: str) -> None:
@@ -599,16 +775,29 @@ class LumSwingPanel(QWidget):
         self._btn_run.setEnabled(True)
         self._btn_stop.setEnabled(False)
 
-    def _update_table(self) -> None:
-        rows = self._rows[-8:]
-        self._table.setRowCount(len(rows))
-        for ri, r in enumerate(rows):
-            for ci, val in enumerate([len(self._rows) - len(rows) + ri + 1,
-                                       f"{r.Lv:.3f}", f"{r.x:.4f}", f"{r.y:.4f}",
-                                       f"{r.u_prime:.4f}", f"{r.v_prime:.4f}"]):
-                item = QTableWidgetItem(str(val))
-                item.setTextAlignment(Qt.AlignCenter)
-                self._table.setItem(ri, ci, item)
+    def _get_col_for_key(self, key: str) -> int:
+        for c in range(1, self._table.columnCount()):
+            h = self._table.horizontalHeaderItem(c)
+            if h and h.text() == key:
+                return c
+        col = self._table.columnCount()
+        self._table.setColumnCount(col + 1)
+        self._table.setHorizontalHeaderItem(col, QTableWidgetItem(key))
+        return col
+
+    def _update_table(self, key: str, r: MeasureResult, n: int) -> None:
+        col = self._get_col_for_key(key)
+        # 행이 부족하면 추가 (# 셀 포함)
+        while n > self._table.rowCount():
+            row_idx = self._table.rowCount()
+            self._table.insertRow(row_idx)
+            idx_item = QTableWidgetItem(str(row_idx + 1))
+            idx_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._table.setItem(row_idx, 0, idx_item)
+        item = QTableWidgetItem(f"{r.Lv:.3f}")
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._table.setItem(n - 1, col, item)
+        self._table.scrollToBottom()
 
 
 # ---------------------------------------------------------------------------
@@ -622,39 +811,77 @@ def _qt_brand_color(brand: str) -> str:
     return _BRAND_COLOR_QT.get(brand.lower().strip(), "#FF8800")
 
 
+_CASE_COLORS = {"Vivid": "#e74c3c", "Standard": "#4f8ef7", "Cinema": "#27ae60"}
+
+
 class LumLoadingPanel(QWidget):
     def __init__(self, engine: MeasurementEngine, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._engine = engine
         self._results: Dict[str, Any] = {}
         self._raw_data: Dict[int, List[MeasureResult]] = {}
-        self._last_hdr_raw: Dict[int, List[MeasureResult]] = {}
-        self._last_sdr_raw: Dict[int, List[MeasureResult]] = {}
+        # mode("SDR"/"HDR") → case → apl → results
+        self._all_data: Dict[str, Dict[str, Dict[int, List[MeasureResult]]]] = {
+            "SDR": {}, "HDR": {}
+        }
         layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         title = QLabel("📊 APL 로딩 (Luminance Loading)")
-        title.setStyleSheet("font-size:16px;font-weight:bold;margin-bottom:4px;")
+        title.setStyleSheet("font-size:15px;font-weight:bold;")
         layout.addWidget(title)
 
-        ctrl = QFormLayout()
+        # ── 설정 한 줄 ────────────────────────────────────────────────
+        cfg_row = QHBoxLayout()
+        cfg_row.addWidget(QLabel("버전:"))
         self._version_combo = QComboBox()
-        self._version_combo.addItems(["37단계", "10단계", "2단계"])
-        ctrl.addRow("버전:", self._version_combo)
+        self._version_combo.addItems(["10단계", "37단계", "2단계"])
+        self._version_combo.setFixedWidth(80)
+        cfg_row.addWidget(self._version_combo)
+        cfg_row.addSpacing(12)
+        cfg_row.addWidget(QLabel("케이스:"))
         self._case_combo = QComboBox()
         self._case_combo.addItems(["Vivid", "Standard", "Cinema"])
-        ctrl.addRow("케이스:", self._case_combo)
-        self._hdr_check = QCheckBox("HDR")
-        self._hdr_check.stateChanged.connect(self._on_hdr_toggled)
-        ctrl.addRow("", self._hdr_check)
-        self._cooling_check = QCheckBox("쿨링 (APL≤10 측정 전 Black 출력)")
-        ctrl.addRow("", self._cooling_check)
+        self._case_combo.setFixedWidth(90)
+        cfg_row.addWidget(self._case_combo)
+        cfg_row.addSpacing(12)
+        cfg_row.addWidget(QLabel("측정 횟수:"))
         self._meas_count = QSpinBox()
-        self._meas_count.setRange(1, 20)
+        self._meas_count.setRange(1, 10)
         self._meas_count.setValue(1)
         self._meas_count.setSuffix(" 회")
-        ctrl.addRow("패턴당 측정 횟수:", self._meas_count)
-        layout.addLayout(ctrl)
+        self._meas_count.setFixedWidth(100)
+        cfg_row.addWidget(self._meas_count)
+        cfg_row.addSpacing(12)
+        self._hdr_check = QCheckBox("HDR")
+        self._hdr_check.stateChanged.connect(self._on_hdr_toggled)
+        cfg_row.addWidget(self._hdr_check)
+        cfg_row.addStretch()
+        layout.addLayout(cfg_row)
 
+        # ── 쿨링 조건 한 줄 ──────────────────────────────────────────
+        cool_row = QHBoxLayout()
+        self._cooling_check = QCheckBox("쿨링")
+        cool_row.addWidget(self._cooling_check)
+        cool_row.addWidget(QLabel("APL <"))
+        self._cool_apl_spin = QSpinBox()
+        self._cool_apl_spin.setRange(1, 100)
+        self._cool_apl_spin.setValue(10)
+        self._cool_apl_spin.setSuffix(" %")
+        self._cool_apl_spin.setFixedWidth(100)
+        cool_row.addWidget(self._cool_apl_spin)
+        cool_row.addWidget(QLabel("일 때"))
+        self._cool_sec_spin = QSpinBox()
+        self._cool_sec_spin.setRange(1, 60)
+        self._cool_sec_spin.setValue(5)
+        self._cool_sec_spin.setSuffix(" 초")
+        self._cool_sec_spin.setFixedWidth(100)
+        cool_row.addWidget(self._cool_sec_spin)
+        cool_row.addWidget(QLabel("Black 출력"))
+        cool_row.addStretch()
+        layout.addLayout(cool_row)
+
+        # ── 버튼 행 ──────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         self._btn_run = QPushButton("▶  측정 시작")
         self._btn_run.setObjectName("primary")
@@ -668,7 +895,7 @@ class LumLoadingPanel(QWidget):
         self._btn_export = QPushButton("💾  Excel 저장")
         self._btn_export.clicked.connect(self._export)
         btn_row.addWidget(self._btn_export)
-        self._btn_clear = QPushButton("🗑  그래프 초기화")
+        self._btn_clear = QPushButton("🗑  초기화")
         self._btn_clear.clicked.connect(self._clear_chart)
         btn_row.addWidget(self._btn_clear)
         btn_row.addStretch()
@@ -680,55 +907,103 @@ class LumLoadingPanel(QWidget):
         self._status_label.setObjectName("muted")
         layout.addWidget(self._status_label)
 
-        # APL vs Lv 인라인 차트 (HDR + SDR 두 시리즈)
-        self._apl_chart = QChart()
-        self._apl_chart.setTitle("APL vs Lv")
-        self._apl_chart.setBackgroundBrush(QColor("#ffffff"))
-        self._apl_chart.setTitleBrush(QColor("#1a1d2e"))
-        self._apl_chart.legend().setLabelColor(QColor("#1a1d2e"))
-        self._apl_chart.legend().show()
+        # ── SDR / HDR 차트 좌우 분할 ─────────────────────────────────
+        def _make_apl_chart(title: str):
+            chart = QChart()
+            chart.setTitle(title)
+            chart.setBackgroundBrush(QColor("#ffffff"))
+            chart.setMargins(QMargins(2, 2, 2, 2))
+            chart.setContentsMargins(0, 0, 0, 0)
 
-        self._apl_series_hdr = QLineSeries()
-        self._apl_series_hdr.setName("HDR")
-        self._apl_series_sdr = QLineSeries()
-        self._apl_series_sdr.setName("SDR")
+            title_font = chart.titleFont()
+            title_font.setPointSize(9)
+            chart.setTitleFont(title_font)
+            chart.setTitleBrush(QColor("#1a1d2e"))
 
-        self._apl_axis_x = QValueAxis()
-        self._apl_axis_x.setTitleText("APL (%)")
-        self._apl_axis_x.setRange(0, 100)
-        self._apl_axis_x.setTickCount(11)
-        self._apl_axis_x.setLabelsBrush(QColor("#6b7080"))
-        self._apl_axis_x.setTitleBrush(QColor("#6b7080"))
-        self._apl_axis_y = QValueAxis()
-        self._apl_axis_y.setTitleText("Lv (cd/m²)")
-        self._apl_axis_y.setLabelsBrush(QColor("#6b7080"))
-        self._apl_axis_y.setTitleBrush(QColor("#6b7080"))
-        self._apl_chart.addAxis(self._apl_axis_x, Qt.AlignBottom)
-        self._apl_chart.addAxis(self._apl_axis_y, Qt.AlignLeft)
+            legend = chart.legend()
+            legend.setLabelColor(QColor("#1a1d2e"))
+            legend.show()
+            leg_font = legend.font()
+            leg_font.setPointSize(8)
+            legend.setFont(leg_font)
 
-        for series, color, dash in [
-            (self._apl_series_hdr, QColor("#e74c3c"), False),
-            (self._apl_series_sdr, QColor("#4f8ef7"), True),
-        ]:
-            self._apl_chart.addSeries(series)
-            pen = series.pen()
-            pen.setColor(color)
+            ax = QValueAxis()
+            ax.setTitleText("APL (%)")
+            ax.setRange(0, 100)
+            ax.setTickCount(11)
+            ax.setLabelsBrush(QColor("#6b7080"))
+            ax.setTitleBrush(QColor("#6b7080"))
+            ax.setLabelFormat("%d")
+            ax_font = ax.labelsFont()
+            ax_font.setPointSize(8)
+            ax.setLabelsFont(ax_font)
+            ax_title_font = ax.titleFont()
+            ax_title_font.setPointSize(8)
+            ax.setTitleFont(ax_title_font)
+
+            ay = QValueAxis()
+            ay.setTitleText("Lv (cd/m²)")
+            ay.setLabelsBrush(QColor("#6b7080"))
+            ay.setTitleBrush(QColor("#6b7080"))
+            ay.setLabelFormat("%d")
+            ay.setLabelsFont(ax_font)
+            ay.setTitleFont(ax_title_font)
+
+            chart.addAxis(ax, Qt.AlignBottom)
+            chart.addAxis(ay, Qt.AlignLeft)
+            view = QChartView(chart)
+            view.setRenderHint(QPainter.Antialiasing)
+            view.setMinimumHeight(60)
+            view.setStyleSheet("background: #ffffff;")
+            return chart, ax, ay, view
+
+        (self._chart_sdr, self._ax_x_sdr,
+         self._ax_y_sdr, view_sdr) = _make_apl_chart("SDR")
+        (self._chart_hdr, self._ax_x_hdr,
+         self._ax_y_hdr, view_hdr) = _make_apl_chart("HDR")
+
+        # ── 시리즈를 Vivid→Standard→Cinema 순서로 미리 생성 (범례 순서 고정) ──
+        _CASE_ORDER = ["Vivid", "Standard", "Cinema"]
+        self._sdr_apl_series: Dict[str, QLineSeries] = {}
+        self._hdr_apl_series: Dict[str, QLineSeries] = {}
+
+        def _make_apl_series(case: str, chart: QChart,
+                             ax_x: QValueAxis, ax_y: QValueAxis) -> QLineSeries:
+            s = QLineSeries()
+            s.setName(case)
+            pen = s.pen()
+            pen.setColor(QColor(_CASE_COLORS.get(case, "#888899")))
             pen.setWidth(2)
-            if dash:
-                pen.setStyle(Qt.DashLine)
-            series.setPen(pen)
-            series.attachAxis(self._apl_axis_x)
-            series.attachAxis(self._apl_axis_y)
+            s.setPen(pen)
+            chart.addSeries(s)
+            s.attachAxis(ax_x)
+            s.attachAxis(ax_y)
+            return s
 
-        apl_chart_view = QChartView(self._apl_chart)
-        apl_chart_view.setRenderHint(QPainter.Antialiasing)
-        apl_chart_view.setMinimumHeight(220)
-        apl_chart_view.setStyleSheet("background: #ffffff;")
-        layout.addWidget(apl_chart_view)
+        for _case in _CASE_ORDER:
+            self._sdr_apl_series[_case] = _make_apl_series(
+                _case, self._chart_sdr, self._ax_x_sdr, self._ax_y_sdr)
+            self._hdr_apl_series[_case] = _make_apl_series(
+                _case, self._chart_hdr, self._ax_x_hdr, self._ax_y_hdr)
+
+        # SDR / HDR 차트 좌우 분할
+        chart_split = QSplitter(Qt.Horizontal)
+        chart_split.addWidget(view_sdr)
+        chart_split.addWidget(view_hdr)
+        chart_split.setStretchFactor(0, 1)
+        chart_split.setStretchFactor(1, 1)
 
         self._table = QTableWidget(0, 9)
+        self._table.setAlternatingRowColors(True)
         self._table.setHorizontalHeaderLabels(["APL%", "#", "Lv (cd/m²)", "x", "y", "u'", "v'", "CCT (K)", "Duv"])
-        layout.addWidget(self._table)
+        self._table.setMinimumHeight(80)
+
+        # 차트-테이블 상하 분할 (드래그로 비율 조정 가능)
+        v_split = QSplitter(Qt.Vertical)
+        v_split.addWidget(chart_split)
+        v_split.addWidget(self._table)
+        v_split.setSizes([110, 140])   # ← 초기 비율 (픽셀), 여기를 바꾸면 됨
+        layout.addWidget(v_split)
 
     @Slot(int)
     def _on_hdr_toggled(self, state: int) -> None:
@@ -766,6 +1041,7 @@ class LumLoadingPanel(QWidget):
         version = version_map[self._version_combo.currentText()]
         self._raw_data.clear()
         self._table.setRowCount(0)
+        self._live_series: Optional["QLineSeries"] = None   # 현재 측정 중인 시리즈
         self._btn_run.setEnabled(False)
         self._worker = MeasurementWorker(
             self._engine, "lum_loading",
@@ -773,6 +1049,8 @@ class LumLoadingPanel(QWidget):
             case=self._case_combo.currentText(),
             is_hdr=self._hdr_check.isChecked(),
             cooling_enabled=self._cooling_check.isChecked(),
+            cooling_apl_threshold=self._cool_apl_spin.value(),
+            cooling_duration_sec=float(self._cool_sec_spin.value()),
             measurements_per_step=self._meas_count.value(),
         )
         self._worker.progress.connect(self._on_progress)
@@ -792,29 +1070,96 @@ class LumLoadingPanel(QWidget):
         if self._worker:
             self._worker.requestInterruption()
 
-    @Slot(object)
+    def _all_data_flat(self) -> Dict[str, Dict[int, List[MeasureResult]]]:
+        """_all_data 전체를 {"SDR_Vivid": {...}, "HDR_Standard": {...}, ...} 로 평탄화.
+
+        export_lum_loading 에 넘길 results_by_case 형태.
+        """
+        flat: Dict[str, Dict[int, List[MeasureResult]]] = {}
+        for mode, cases in self._all_data.items():
+            for case, apl_dict in cases.items():
+                if apl_dict:
+                    flat[f"{mode}_{case}"] = apl_dict
+        return flat
+
+    def _auto_save(self) -> None:
+        flat = self._all_data_flat()
+        if not self._engine.auto_save_dir or not flat:
+            return
+        brand = self._engine.brand or "brand"
+        model = self._engine.model_name or "model"
+        # 고정 파일명 — 케이스가 추가될 때마다 덮어씌워 항상 최신 전체 데이터 유지
+        filename = f"lum_loading_{brand}_{model}.xlsx"
+        path = os.path.join(self._engine.auto_save_dir, filename)
+        try:
+            ExcelExporter().export_lum_loading(
+                flat, self._engine.brand, self._engine.model_name,
+                file_path=path,
+            )
+            cases_str = ", ".join(flat.keys())
+            self._status_label.setText(
+                f"완료 — {len(self._raw_data)}개 APL  |  자동 저장 ({cases_str}): {path}"
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "자동 저장 실패", str(e))
+
     def _on_finished(self, result: Any) -> None:
         self._results = result or {}
-        if self._hdr_check.isChecked():
-            self._last_hdr_raw = dict(self._raw_data)
-        else:
-            self._last_sdr_raw = dict(self._raw_data)
+        self._live_series = None  # 라이브 시리즈 참조 해제
+        mode = "HDR" if self._hdr_check.isChecked() else "SDR"
+        case = self._case_combo.currentText()
+        self._all_data[mode][case] = dict(self._raw_data)
+        # 세션 업데이트 후 통합 파일 자동 저장
+        self._engine.session_loading[f"{mode}_{case}"] = dict(self._raw_data)
         self._status_label.setText(f"완료 — {len(self._raw_data)}개 APL 측정")
         self._btn_run.setEnabled(True)
         self._btn_stop.setEnabled(False)
-        self._refresh_apl_chart()
+        path = _save_all_session(self._engine)
+        if path:
+            self._status_label.setText(
+                f"완료 — {len(self._raw_data)}개 APL  |  저장: {path}"
+            )
 
     @Slot(str, float, object)
     def _on_progress(self, _step: str, pct: float, data: Any) -> None:
         self._progress.setValue(int(pct * 100))
-        if isinstance(data, dict) and "apl" in data:
-            apl = int(data["apl"])
-            results: List[MeasureResult] = data.get("results", [])
-            self._raw_data[apl] = results
-            self._refresh_table()
-            self._table.scrollToBottom()
-            lv_avg = sum(r.Lv for r in results) / len(results) if results else 0
-            self._status_label.setText(f"APL {apl}% — Lv={lv_avg:.3f} cd/m²  ({int(pct*100)}%)")
+        if not (isinstance(data, dict) and "apl" in data):
+            return
+        apl = int(data["apl"])
+        results: List[MeasureResult] = data.get("results", [])
+        self._raw_data[apl] = results
+
+        # ── 테이블: 새 APL 스텝 행만 추가 (전체 재구성 없음) ─────────────
+        for idx, r in enumerate(results, start=1):
+            self._add_table_row(f"{apl}%", str(idx), r)
+        self._table.scrollToBottom()
+
+        lv_avg = sum(r.Lv for r in results) / len(results) if results else 0
+        self._status_label.setText(f"APL {apl}% — Lv={lv_avg:.3f} cd/m²  ({int(pct*100)}%)")
+
+        # ── 차트: 현재 케이스 시리즈에 포인트 추가만 (전체 재생성 없음) ──
+        mode = "HDR" if self._hdr_check.isChecked() else "SDR"
+        case = self._case_combo.currentText()
+        self._all_data[mode].setdefault(case, {})[apl] = results
+
+        ax_y  = self._ax_y_sdr  if mode == "SDR" else self._ax_y_hdr
+
+        if self._live_series is None:
+            # 새 측정 시작 — 미리 만든 시리즈 데이터만 초기화 후 사용
+            series_map = self._sdr_apl_series if mode == "SDR" else self._hdr_apl_series
+            series = series_map[case]
+            series.clear()
+            self._live_series = series
+
+        self._live_series.append(float(apl), lv_avg)
+
+        # Y축 범위 동적 확장
+        all_lv = [
+            sum(r.Lv for r in rs) / len(rs)
+            for rs in self._raw_data.values() if rs
+        ]
+        if all_lv:
+            ax_y.setRange(0, max(all_lv) * 1.15)
 
     def _refresh_table(self) -> None:
         self._table.setRowCount(0)
@@ -822,46 +1167,38 @@ class LumLoadingPanel(QWidget):
             results = self._raw_data[apl]
             for idx, r in enumerate(results, start=1):
                 self._add_table_row(f"{apl}%", str(idx), r)
-        self._refresh_apl_chart()
 
     def _refresh_apl_chart(self) -> None:
-        self._apl_series_hdr.clear()
-        self._apl_series_sdr.clear()
+        for s in list(self._sdr_apl_series.values()) + list(self._hdr_apl_series.values()):
+            s.clear()
 
-        all_lv: List[float] = []
-
-        # 측정 중이면 현재 raw_data를 해당 모드 시리즈에 실시간 반영
-        is_hdr_mode = self._hdr_check.isChecked()
-        live_series = self._apl_series_hdr if is_hdr_mode else self._apl_series_sdr
-
-        for apl in sorted(self._raw_data):
-            results = self._raw_data[apl]
-            if not results:
-                continue
-            lv = sum(r.Lv for r in results) / len(results)
-            live_series.append(float(apl), lv)
-            all_lv.append(lv)
-
-        # 완료된 반대 모드 데이터도 함께 표시
-        other_raw = self._last_sdr_raw if is_hdr_mode else self._last_hdr_raw
-        other_series = self._apl_series_sdr if is_hdr_mode else self._apl_series_hdr
-        for apl in sorted(other_raw):
-            results = other_raw[apl]
-            if not results:
-                continue
-            lv = sum(r.Lv for r in results) / len(results)
-            other_series.append(float(apl), lv)
-            all_lv.append(lv)
-
-        if all_lv:
-            self._apl_axis_y.setRange(0, max(all_lv) * 1.15)
+        for mode, series_map, ax_y in [
+            ("SDR", self._sdr_apl_series, self._ax_y_sdr),
+            ("HDR", self._hdr_apl_series, self._ax_y_hdr),
+        ]:
+            all_lv: List[float] = []
+            for case, apl_dict in self._all_data[mode].items():
+                series = series_map.get(case)
+                if not series or not apl_dict:
+                    continue
+                for apl in sorted(apl_dict):
+                    results = apl_dict[apl]
+                    if not results:
+                        continue
+                    lv = sum(r.Lv for r in results) / len(results)
+                    series.append(float(apl), lv)
+                    all_lv.append(lv)
+            if all_lv:
+                ax_y.setRange(0, max(all_lv) * 1.15)
 
     def _clear_chart(self) -> None:
-        self._last_hdr_raw.clear()
-        self._last_sdr_raw.clear()
+        self._all_data = {"SDR": {}, "HDR": {}}
         self._raw_data.clear()
-        self._apl_series_hdr.clear()
-        self._apl_series_sdr.clear()
+        self._live_series = None
+        for s in list(self._sdr_apl_series.values()) + list(self._hdr_apl_series.values()):
+            s.clear()
+        for ay in (self._ax_y_sdr, self._ax_y_hdr):
+            ay.setRange(0, 100)
         self._table.setRowCount(0)
         self._status_label.setText("그래프 초기화됨")
 
@@ -896,7 +1233,7 @@ class LumLoadingPanel(QWidget):
                     file_path=path,
                 )
                 QMessageBox.information(self, "저장 완료", f"저장됨: {path}")
-            except Exception as exc:
+            except Exception:
                 import traceback
                 QMessageBox.critical(self, "저장 오류", traceback.format_exc())
 
@@ -921,48 +1258,58 @@ class GamutPanel(QWidget):
         self._results: Dict[str, MeasureResult] = {}
         self._gamut_stats: Dict[str, float] = {}
         layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        title = QLabel("🎨 색재현율 (Gamut)")
-        title.setStyleSheet("font-size:16px;font-weight:bold;margin-bottom:4px;")
-        layout.addWidget(title)
-        desc = QLabel("Full Pattern (100%) — R → G → B → W → BK 순으로 자동 측정합니다.")
-        desc.setObjectName("muted")
-        layout.addWidget(desc)
-
-        btn_row = QHBoxLayout()
+        # ── 타이틀 + 버튼 + 프로그레스 + 통계 (한 줄) ───────────────────
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
+        title = QLabel("🎨 색재현율")
+        title.setStyleSheet("font-size:15px;font-weight:bold;")
+        top_row.addWidget(title)
         self._hdr_check = QCheckBox("HDR")
         self._hdr_check.stateChanged.connect(self._on_hdr_toggled)
-        btn_row.addWidget(self._hdr_check)
+        top_row.addWidget(self._hdr_check)
         self._btn_run = QPushButton("▶  측정 시작")
         self._btn_run.setObjectName("primary")
         self._btn_run.clicked.connect(self._run)
-        btn_row.addWidget(self._btn_run)
+        top_row.addWidget(self._btn_run)
         self._btn_stop = QPushButton("■  중지")
         self._btn_stop.setObjectName("danger")
         self._btn_stop.setEnabled(False)
         self._btn_stop.clicked.connect(self._stop)
-        btn_row.addWidget(self._btn_stop)
+        top_row.addWidget(self._btn_stop)
         self._btn_export = QPushButton("💾  Excel 저장")
         self._btn_export.clicked.connect(self._export)
-        btn_row.addWidget(self._btn_export)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        self._progress = QProgressBar()
-        layout.addWidget(self._progress)
-        self._status_label = QLabel("대기 중")
-        self._status_label.setObjectName("muted")
-        layout.addWidget(self._status_label)
-
-        # 통계 레이블 (DCI-P3 / BT.2020 Coverage)
-        stats_row = QHBoxLayout()
-        self._lbl_dci   = QLabel("DCI-P3: —")
+        top_row.addWidget(self._btn_export)
+        top_row.addStretch()
+        self._lbl_dci    = QLabel("DCI-P3: —")
         self._lbl_bt2020 = QLabel("BT.2020: —")
         for lbl in (self._lbl_dci, self._lbl_bt2020):
-            lbl.setStyleSheet("font-weight:bold; font-size:13px; padding:2px 10px;")
-            stats_row.addWidget(lbl)
-        stats_row.addStretch()
-        layout.addLayout(stats_row)
+            lbl.setStyleSheet("font-weight:bold; font-size:13px; padding:2px 8px;")
+            top_row.addWidget(lbl)
+        layout.addLayout(top_row)
+
+        # ── 프로그레스 + 상태 (다음 줄) ─────────────────────────────────
+        prog_row = QHBoxLayout()
+        self._progress = QProgressBar()
+        self._progress.setFixedHeight(10)
+        prog_row.addWidget(self._progress)
+        self._status_label = QLabel("대기 중")
+        self._status_label.setObjectName("muted")
+        prog_row.addWidget(self._status_label)
+        prog_row.addStretch()
+        layout.addLayout(prog_row)
+
+        # ── 저장 경로 (별도 줄, 평소에는 숨김) ────────────────────────────
+        self._path_label = QLabel()
+        self._path_label.setObjectName("muted")
+        self._path_label.setStyleSheet("font-size:11px; padding:0px 2px;")
+        self._path_label.setVisible(False)
+        layout.addWidget(self._path_label)
+
+        # ↓ 버튼 행~저장경로 라벨까지와 차트+표 사이의 간격
+        #   숫자를 늘리면 차트+표가 아래로 내려갑니다 (단위: px)
+        layout.addSpacing(60)  # ← 이 값을 조절하세요 (예: 16, 24, 40 ...)
 
         # u'v' 차트 + 테이블 분할
         splitter = QSplitter(Qt.Horizontal)
@@ -992,15 +1339,16 @@ class GamutPanel(QWidget):
 
         chart_view = QChartView(self._chart)
         chart_view.setRenderHint(QPainter.Antialiasing)
-        chart_view.setMinimumWidth(420)
-        chart_view.setMinimumHeight(420)
+        chart_view.setMinimumWidth(420)   # ← 차트 최소 너비 (px)
+        chart_view.setMinimumHeight(420)  # ← 차트 최소 높이 (px)
         chart_view.setStyleSheet("background: #ffffff;")
         splitter.addWidget(chart_view)
 
         self._table = QTableWidget(0, 9)
+        self._table.setAlternatingRowColors(True)
         self._table.setHorizontalHeaderLabels(["컬러", "Lv", "x", "y", "u'", "v'", "X", "Y", "Z"])
         splitter.addWidget(self._table)
-        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(0, 3)  # ← 차트 : 표 = 3 : 2 비율 (숫자로 조절)
         splitter.setStretchFactor(1, 2)
         layout.addWidget(splitter)
 
@@ -1058,6 +1406,7 @@ class GamutPanel(QWidget):
     def _run(self) -> None:
         self._table.setRowCount(0)
         self._results.clear()
+        self._set_path("")
         # 기존 측정점 시리즈 제거 후 기준 gamut 재설정
         self._chart.removeAllSeries()
         self._add_reference_gamut()
@@ -1081,16 +1430,43 @@ class GamutPanel(QWidget):
         if self._worker:
             self._worker.requestInterruption()
 
+    def _set_path(self, path: str) -> None:
+        if path:
+            self._path_label.setText(f"저장: {path}")
+            self._path_label.setVisible(True)
+        else:
+            self._path_label.setVisible(False)
+
+    def _auto_save(self) -> None:
+        if not self._engine.auto_save_dir or not self._results:
+            return
+        mode = "HDR" if self._hdr_check.isChecked() else "SDR"
+        brand = self._engine.brand or "brand"
+        model = self._engine.model_name or "model"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"gamut_{mode}_{brand}_{model}_{ts}.xlsx"
+        path = os.path.join(self._engine.auto_save_dir, filename)
+        try:
+            ExcelExporter().export_gamut(self._results, self._engine.brand,
+                                         self._engine.model_name, file_path=path)
+            self._status_label.setText("완료  |  자동 저장")
+            self._set_path(path)
+        except Exception as e:
+            QMessageBox.warning(self, "자동 저장 실패", str(e))
+
     @Slot(object)
     def _on_finished(self, result: Any) -> None:
         self._results = result or {}
         self._status_label.setText("완료")
         self._btn_run.setEnabled(True)
         self._btn_stop.setEnabled(False)
-        # 색재현율 통계 계산
         self._update_gamut_stats()
-        # 측정 삼각형(R-G-B) 라인 추가
         self._draw_meas_triangle()
+        # 세션 업데이트 후 통합 파일 자동 저장
+        mode = "HDR" if self._hdr_check.isChecked() else "SDR"
+        self._engine.session_gamut[mode] = dict(self._results)
+        path = _save_all_session(self._engine)
+        self._set_path(path)
 
     def _update_gamut_stats(self) -> None:
         r_r = self._results.get("red")
@@ -1134,6 +1510,9 @@ class GamutPanel(QWidget):
         self._progress.setValue(int(pct * 100))
         if isinstance(data, dict) and "color" in data:
             color = data["color"]
+            if color is None:
+                self._status_label.setText("초기화 중...")
+                return
             r = data.get("result")
             if r:
                 # 테이블 행 추가
@@ -1167,9 +1546,12 @@ class GamutPanel(QWidget):
         default_name = f"gamut_{brand}_{model}.xlsx"
         path, _ = QFileDialog.getSaveFileName(self, "Excel 저장", default_name, "Excel (*.xlsx)")
         if path:
-            ExcelExporter().export_gamut(self._results, self._engine.brand, self._engine.model_name,
-                                         file_path=path)
-            QMessageBox.information(self, "저장 완료", f"저장됨: {path}")
+            try:
+                ExcelExporter().export_gamut(self._results, self._engine.brand,
+                                             self._engine.model_name, file_path=path)
+                QMessageBox.information(self, "저장 완료", f"저장됨: {path}")
+            except Exception as e:
+                QMessageBox.critical(self, "저장 오류", str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -1182,11 +1564,12 @@ class ContrastPanel(QWidget):
         self._engine = engine
         self._results: Dict[float, MeasureResult] = {}
         layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         title = QLabel("⬛ 명암비 (Contrast Ratio)")
-        title.setStyleSheet("font-size:16px;font-weight:bold;margin-bottom:4px;")
+        title.setStyleSheet("font-size:15px;font-weight:bold;")
         layout.addWidget(title)
-        desc = QLabel("White Raster + Black Window — 100% / 50% / 20% / 14.1% / 0% 순으로 측정합니다.")
+        desc = QLabel("White Raster + Black Window — 창 H/V 100% → 50% → 20% → 14.1% 순으로 측정합니다.")
         desc.setObjectName("muted")
         layout.addWidget(desc)
 
@@ -1215,34 +1598,79 @@ class ContrastPanel(QWidget):
         self._status_label.setObjectName("muted")
         layout.addWidget(self._status_label)
 
+        self._lv_ref: Optional[float] = None  # 창 100% 기준 흑휘도
         self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["윈도우 크기", "Lv (cd/m²)", "x", "y", "비고"])
+        self._table.setAlternatingRowColors(True)
+        self._table.setHorizontalHeaderLabels(["Black H/V (%)", "Lv (cd/m²)", "x", "y", "CR (White/Lv)"])
         layout.addWidget(self._table)
 
     @Slot(int)
     def _on_hdr_toggled(self, state: int) -> None:
         gen = self._engine.generator
         if gen is None or not gen.is_connected:
+            self._hdr_check.blockSignals(True)
+            self._hdr_check.setChecked(not bool(state))
+            self._hdr_check.blockSignals(False)
+            self._status_label.setText("제너레이터가 연결되지 않았습니다.")
             return
-        fn = lambda: gen.set_hdr(bool(state))
-        worker = ConnectWorker(fn)
-        worker.error.connect(lambda msg: QMessageBox.critical(self, "HDR 전환 오류", msg))
-        wire_worker_cleanup(worker, self, '_hdr_worker')
+        if getattr(self, '_hdr_worker', None) is not None:
+            return
+        enabled = bool(state)
+        self._hdr_check.setEnabled(False)
+        self._status_label.setText("HDR 전환 중..." if enabled else "SDR 전환 중...")
+
+        def _done():
+            self._hdr_check.setEnabled(True)
+            self._status_label.setText("HDR 모드" if enabled else "SDR 모드")
+            setattr(self, '_hdr_worker', None)
+
+        worker = ConnectWorker(lambda: gen.set_hdr(enabled))
+        worker.error.connect(lambda msg: (
+            QMessageBox.critical(self, "HDR 전환 오류", msg),
+            self._hdr_check.blockSignals(True),
+            self._hdr_check.setChecked(not enabled),
+            self._hdr_check.blockSignals(False),
+        ))
+        wire_worker_cleanup(worker, self, '_hdr_worker', extra_cb=_done)
         worker.start()
         self._hdr_worker = worker
 
+    def _auto_save(self) -> None:
+        if not self._engine.auto_save_dir or not self._results:
+            return
+        mode = "HDR" if self._hdr_check.isChecked() else "SDR"
+        brand = self._engine.brand or "brand"
+        model = self._engine.model_name or "model"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"contrast_{mode}_{brand}_{model}_{ts}.xlsx"
+        path = os.path.join(self._engine.auto_save_dir, filename)
+        try:
+            ExcelExporter().export_contrast(self._results, self._engine.brand,
+                                            self._engine.model_name, file_path=path)
+            self._status_label.setText(f"완료  |  자동 저장: {path}")
+        except Exception as e:
+            QMessageBox.warning(self, "자동 저장 실패", str(e))
+
+    def _on_finished(self, result: Any) -> None:
+        self._results = result or {}
+        self._status_label.setText("완료")
+        self._btn_run.setEnabled(True)
+        self._btn_stop.setEnabled(False)
+        # 세션 업데이트 후 통합 파일 자동 저장
+        mode = "HDR" if self._hdr_check.isChecked() else "SDR"
+        self._engine.session_contrast[mode] = dict(self._results)
+        path = _save_all_session(self._engine)
+        if path:
+            self._status_label.setText(f"완료  |  저장: {path}")
+
     def _run(self) -> None:
         self._table.setRowCount(0)
+        self._lv_ref = None
         self._btn_run.setEnabled(False)
         self._btn_stop.setEnabled(True)
         self._worker = MeasurementWorker(self._engine, "contrast", is_hdr=self._hdr_check.isChecked())
         self._worker.progress.connect(self._on_progress)
-        self._worker.succeeded.connect(lambda r: (
-            setattr(self, '_results', r or {}),
-            self._status_label.setText("완료"),
-            self._btn_run.setEnabled(True),
-            self._btn_stop.setEnabled(False),
-        ))
+        self._worker.succeeded.connect(self._on_finished)
         self._worker.error.connect(lambda m: (
             QMessageBox.critical(self, "오류", m),
             self._btn_run.setEnabled(True),
@@ -1259,18 +1687,35 @@ class ContrastPanel(QWidget):
     @Slot(str, float, object)
     def _on_progress(self, _step: str, pct: float, data: Any) -> None:
         self._progress.setValue(int(pct * 100))
-        if isinstance(data, dict) and "win_size" in data:
-            win_size = data["win_size"]
-            r = data.get("result")
-            if r:
-                row = self._table.rowCount()
-                self._table.insertRow(row)
-                for ci, val in enumerate([f"{win_size}%", f"{r.Lv:.4f}",
-                                           f"{r.x:.4f}", f"{r.y:.4f}", ""]):
-                    item = QTableWidgetItem(str(val))
-                    item.setTextAlignment(Qt.AlignCenter)
-                    self._table.setItem(row, ci, item)
-            self._status_label.setText(f"윈도우 {win_size}% 측정 — {int(pct*100)}%")
+        if not (isinstance(data, dict) and "win_size" in data):
+            return
+        win_size = data["win_size"]   # 0.0 = full white ref, else black window H/V side %
+        r = data.get("result")
+        if not r:
+            return
+
+        # win_size 0.0 = Full White → 기준 Lv 저장
+        if win_size == 0.0:
+            self._lv_ref = r.Lv
+
+        hv_label = "Full White" if win_size == 0.0 else f"{win_size:.1f} × {win_size:.1f}"
+
+        # CR = Full White Lv / Black Lv (black window 행에만, Lv > 0 가드)
+        if win_size > 0.0 and self._lv_ref and self._lv_ref > 0 and r.Lv > 0:
+            cr_str = f"{self._lv_ref / r.Lv:.1f} : 1"
+        else:
+            cr_str = "—"
+
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        for ci, val in enumerate([hv_label, f"{r.Lv:.4f}",
+                                   f"{r.x:.4f}", f"{r.y:.4f}", cr_str]):
+            item = QTableWidgetItem(str(val))
+            item.setTextAlignment(Qt.AlignCenter)
+            self._table.setItem(row, ci, item)
+
+        step_label = "Full White" if win_size == 0.0 else f"창 H/V {win_size:.1f}%"
+        self._status_label.setText(f"{step_label} 측정 — {int(pct*100)}%")
 
     def _export(self) -> None:
         if not self._results:
@@ -1297,6 +1742,7 @@ _DEFAULT_MODEL_COLORS = [
 
 
 class ReportPanel(QWidget):
+    # ── 경쟁사 비교 장표 ──────────────────────────────────────────────────────
     _ROW_LABELS = [
         ("White 휘도", "HDR 10%"),
         ("White 휘도", "HDR 100%"),
@@ -1306,6 +1752,33 @@ class ReportPanel(QWidget):
         ("White 휘도", "Black (cd/m²)"),
         ("Color Gamut", "DCI-P3 (%)"),
         ("Color Gamut", "BT.2020 (%)"),
+    ]
+    _COMP_KEYS = [
+        "hdr_10", "hdr_100", "sdr_10", "sdr_100",
+        "contrast_ratio", "black_lv", "dci_overlap", "bt2020_overlap",
+    ]
+
+    # ── 광학 측정 데이터 ──────────────────────────────────────────────────────
+    _OPTICAL_ROW_LABELS = [
+        ("휘도", "Vivid SDR 10% / 100%"),
+        ("휘도", "Standard SDR 10% / 100%"),
+        ("휘도", "Vivid HDR 10% / 100%"),
+        ("휘도", "Standard HDR 10% / 100%"),
+        ("휘도", "Cinema HDR 10% / 100%"),
+        ("Contrast", "Black (Ratio)"),
+        ("Color Gamut", "DCI-P3 (%)"),
+        ("Color Gamut", "BT.2020 (%)"),
+    ]
+    # (key_10, key_100) — key_100=None for single-value rows
+    _OPTICAL_KEYS: List[tuple] = [
+        ("sdr_vivid_10",    "sdr_vivid_100"),
+        ("sdr_standard_10", "sdr_standard_100"),
+        ("hdr_vivid_10",    "hdr_vivid_100"),
+        ("hdr_standard_10", "hdr_standard_100"),
+        ("hdr_cinema_10",   "hdr_cinema_100"),
+        ("contrast_ratio",  None),
+        ("dci_overlap",     None),
+        ("bt2020_overlap",  None),
     ]
 
     def __init__(
@@ -1325,9 +1798,10 @@ class ReportPanel(QWidget):
         self._model_colors: Dict[str, str] = {}
 
         layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         title = QLabel("📋 보고서 템플릿")
-        title.setStyleSheet("font-size:16px;font-weight:bold;margin-bottom:4px;")
+        title.setStyleSheet("font-size:15px;font-weight:bold;")
         layout.addWidget(title)
 
         top_row = QHBoxLayout()
@@ -1336,7 +1810,14 @@ class ReportPanel(QWidget):
         self._btn_load.clicked.connect(self._load_files)
         top_row.addWidget(self._btn_load)
 
-        top_row.addWidget(QLabel("White 휘도 집계:"))
+        top_row.addWidget(QLabel("보고서 형식:"))
+        self._format_combo = QComboBox()
+        self._format_combo.addItems(["경쟁사 비교 장표", "광학 측정 데이터"])
+        self._format_combo.setFixedWidth(150)
+        self._format_combo.currentIndexChanged.connect(self._on_format_changed)
+        top_row.addWidget(self._format_combo)
+
+        top_row.addWidget(QLabel("휘도 집계:"))
         self._agg_combo = QComboBox()
         self._agg_combo.addItems(["최대값", "중간값", "최소값"])
         self._agg_combo.setFixedWidth(90)
@@ -1358,40 +1839,57 @@ class ReportPanel(QWidget):
         layout.addLayout(top_row)
 
         self._model_list = QListWidget()
-        self._model_list.setMaximumHeight(80)
+        self._model_list.setMaximumHeight(60)
         layout.addWidget(self._model_list)
 
-        n_rows = len(self._ROW_LABELS)
-        self._report_table = QTableWidget(n_rows, 2)
+        self._report_table = QTableWidget(len(self._ROW_LABELS), 2)
         self._report_table.setHorizontalHeaderLabels(["구분", "항목"])
-        for ri, (section, item) in enumerate(self._ROW_LABELS):
-            for ci, val in enumerate([section, item]):
-                c = QTableWidgetItem(val)
-                c.setTextAlignment(Qt.AlignCenter)
-                self._report_table.setItem(ri, ci, c)
-        layout.addWidget(self._report_table)
+        self._report_table.setMinimumHeight(50)
+        self._report_table.verticalHeader().setDefaultSectionSize(26)  # ← 행 높이 (px)
+        self._report_table.setColumnWidth(0, 80)   # ← 첫 번째 열(구분) 너비 (px)
+        self._report_table.setColumnWidth(1, 80)   # ← 두 번째 열(항목) 너비 (px)
 
         # ── APL 차트 생성 헬퍼 ────────────────────────────────────────
         def _make_apl_chart(title: str):
             chart = QChart()
             chart.setTitle(title)
             chart.setBackgroundBrush(QColor("#ffffff"))
+            chart.setMargins(QMargins(2, 2, 2, 2))
+
+            tf = chart.titleFont(); tf.setPointSize(8); chart.setTitleFont(tf)
             chart.setTitleBrush(QColor("#1a1d2e"))
-            chart.legend().setLabelColor(QColor("#1a1d2e"))
+
+            sf = tf  # 8pt 공용
             ax = QValueAxis()
-            ax.setTitleText("APL (%)")
-            ax.setRange(0, 100)
-            ax.setTickCount(11)
-            ax.setLabelsBrush(QColor("#6b7080"))
-            ax.setTitleBrush(QColor("#6b7080"))
+            ax.setTitleText("APL (%)"); ax.setRange(0, 100); ax.setTickCount(6)
+            ax.setLabelFormat("%d")
+            ax.setLabelsBrush(QColor("#6b7080")); ax.setTitleBrush(QColor("#6b7080"))
+            ax.setLabelsFont(sf); ax.setTitleFont(sf)
+
             ay = QValueAxis()
-            ay.setTitleText("Lv (cd/m²)")
-            ay.setLabelsBrush(QColor("#6b7080"))
-            ay.setTitleBrush(QColor("#6b7080"))
+            ay.setTitleText("Lv (cd/m²)"); ay.setLabelFormat("%d")
+            ay.setLabelsBrush(QColor("#6b7080")); ay.setTitleBrush(QColor("#6b7080"))
+            ay.setLabelsFont(sf); ay.setTitleFont(sf)
+
             chart.addAxis(ax, Qt.AlignBottom)
             chart.addAxis(ay, Qt.AlignLeft)
+
+            # 범례 차트 내부 우상단 고정
+            legend = chart.legend()
+            lf = legend.font(); lf.setPointSize(7); legend.setFont(lf)
+            legend.setLabelColor(QColor("#1a1d2e"))
+            legend.detachFromChart()
+            legend.setBackgroundVisible(True)
+            legend.setBrush(QColor(255, 255, 255, 210))
+            chart.plotAreaChanged.connect(
+                lambda rect, c=chart: c.legend().setGeometry(
+                    QRectF(rect.right() - 106, rect.top() + 4, 102, 54)
+                )
+            )
+
             view = QChartView(chart)
             view.setRenderHint(QPainter.Antialiasing)
+            view.setMinimumHeight(100)
             view.setStyleSheet("background: #ffffff;")
             return chart, ax, ay, view
 
@@ -1399,13 +1897,13 @@ class ReportPanel(QWidget):
         (self._apl_chart_sdr,
          self._apl_axis_x_sdr,
          self._apl_axis_y_sdr,
-         apl_view_sdr) = _make_apl_chart("APL vs Lv  [SDR Vivid]")
+         apl_view_sdr) = _make_apl_chart("SDR Vivid")
 
         # ── HDR Vivid APL 차트 (아래) ──────────────────────────────────
         (self._apl_chart_hdr,
          self._apl_axis_x_hdr,
          self._apl_axis_y_hdr,
-         apl_view_hdr) = _make_apl_chart("APL vs Lv  [HDR Vivid]")
+         apl_view_hdr) = _make_apl_chart("HDR Vivid")
 
         apl_vsplit = QSplitter(Qt.Vertical)
         apl_vsplit.addWidget(apl_view_sdr)
@@ -1417,8 +1915,21 @@ class ReportPanel(QWidget):
         self._gamut_chart = QChart()
         self._gamut_chart.setTitle("u'v' 색도")
         self._gamut_chart.setBackgroundBrush(QColor("#ffffff"))
+        self._gamut_chart.setMargins(QMargins(2, 2, 2, 2))
         self._gamut_chart.setTitleBrush(QColor("#1a1d2e"))
-        self._gamut_chart.legend().setLabelColor(QColor("#1a1d2e"))
+
+        # 범례 차트 내부 우상단 고정
+        _gl = self._gamut_chart.legend()
+        _gl.setLabelColor(QColor("#1a1d2e"))
+        _glf = _gl.font(); _glf.setPointSize(7); _gl.setFont(_glf)
+        _gl.detachFromChart()
+        _gl.setBackgroundVisible(True)
+        _gl.setBrush(QColor(255, 255, 255, 210))
+        self._gamut_chart.plotAreaChanged.connect(
+            lambda rect, c=self._gamut_chart: c.legend().setGeometry(
+                QRectF(rect.right() - 86, rect.top() + 4, 82, 54)
+            )
+        )
         self._gamut_axis_u = QValueAxis()
         self._gamut_axis_u.setTitleText("u'")
         self._gamut_axis_u.setRange(0.0, 0.65)
@@ -1434,16 +1945,26 @@ class ReportPanel(QWidget):
         self._add_ref_gamuts()
         gamut_chart_view = QChartView(self._gamut_chart)
         gamut_chart_view.setRenderHint(QPainter.Antialiasing)
-        gamut_chart_view.setMinimumHeight(700)
-        gamut_chart_view.setMinimumWidth(400)
+        gamut_chart_view.setMinimumHeight(200)
+        gamut_chart_view.setMinimumWidth(200)
         gamut_chart_view.setStyleSheet("background: #ffffff;")
 
+        # ── 데이터 테이블 ────────────────────────────────────────────
+        self._report_table.setMinimumHeight(45)        # ← 테이블 최소 높이 (px)
+        self._report_table.setMaximumHeight(16777215)  # 제한 없음 (줄이면 최대 높이 고정)
+        # addWidget 두 번째 인수 = stretch 비율
+        # 테이블 : 차트영역 = 3 : 2  →  테이블을 키우려면 3을 4·5로, 줄이려면 1·2로
+        layout.addWidget(self._report_table, 1)        # ← 이 숫자가 테이블 높이 비율
+
+        # ── 좌우: APL 차트 | u'v' 차트 ────────────────────────────────
         chart_splitter = QSplitter(Qt.Horizontal)
         chart_splitter.addWidget(apl_vsplit)
         chart_splitter.addWidget(gamut_chart_view)
-        chart_splitter.setStretchFactor(0, 2)
-        chart_splitter.setStretchFactor(1, 3)
-        layout.addWidget(chart_splitter)
+        chart_splitter.setStretchFactor(0, 3)   # ← APL 차트 너비 비율  (1:1 → 같은 값 / 3:2 → 3,2)
+        chart_splitter.setStretchFactor(1, 2)   # ← u'v' 차트 너비 비율
+        layout.addWidget(chart_splitter, 2)     # ← 이 숫자가 차트 영역 높이 비율
+
+        self._refresh_report_table()
 
     def _change_model_color(self) -> None:
         row = self._model_list.currentRow()
@@ -1467,38 +1988,57 @@ class ReportPanel(QWidget):
         self._model_list.takeItem(row)
         self._refresh_report_table()
 
+    def _is_optical_format(self) -> bool:
+        return self._format_combo.currentIndex() == 1
+
+    def _on_format_changed(self) -> None:
+        self._refresh_report_table()
+
+    def _current_row_labels(self):
+        return self._OPTICAL_ROW_LABELS if self._is_optical_format() else self._ROW_LABELS
+
+    def _cell_value(self, entry: Dict, ri: int) -> str:
+        if self._is_optical_format():
+            k10, k100 = self._OPTICAL_KEYS[ri]
+            v10  = entry.get(k10)
+            v100 = entry.get(k100) if k100 else None
+            if v10 is None and v100 is None:
+                return "—"
+            if k100 is None:
+                return str(v10) if v10 is not None else "—"
+            s10  = f"{v10}"  if v10  is not None else "—"
+            s100 = f"{v100}" if v100 is not None else "—"
+            return f"{s10} / {s100}"
+        else:
+            raw = entry.get(self._COMP_KEYS[ri])
+            return f"{raw}" if raw is not None else "—"
+
     def _refresh_report_table(self) -> None:
-        n_models = len(self._models)
-        self._report_table.setColumnCount(2 + n_models)
+        row_labels = self._current_row_labels()
+        self._report_table.setRowCount(len(row_labels))
+        self._report_table.setColumnCount(2 + len(self._models))
         headers = ["구분", "항목"] + [f"{e['brand']}_{e['model']}" for e in self._models]
         self._report_table.setHorizontalHeaderLabels(headers)
 
-        keys = ["hdr_10", "hdr_100", "sdr_10", "sdr_100",
-                "contrast_ratio", "black_lv", "dci_overlap", "bt2020_overlap"]
-
-        for ri, (section, item) in enumerate(self._ROW_LABELS):
+        for ri, (section, item) in enumerate(row_labels):
             for ci, val in enumerate([section, item]):
                 c = QTableWidgetItem(val)
                 c.setTextAlignment(Qt.AlignCenter)
                 self._report_table.setItem(ri, ci, c)
             for mi, entry in enumerate(self._models):
-                raw = entry.get(keys[ri])
-                text = f"{raw}" if raw is not None else "—"
-                c = QTableWidgetItem(text)
+                c = QTableWidgetItem(self._cell_value(entry, ri))
                 c.setTextAlignment(Qt.AlignCenter)
                 self._report_table.setItem(ri, 2 + mi, c)
 
     def _table_to_text(self) -> str:
+        row_labels = self._current_row_labels()
         lines = []
         headers = ["구분", "항목"] + [f"{e['brand']}_{e['model']}" for e in self._models]
         lines.append("\t".join(headers))
-        keys = ["hdr_10", "hdr_100", "sdr_10", "sdr_100",
-                "contrast_ratio", "black_lv", "dci_overlap", "bt2020_overlap"]
-        for ri, (section, item) in enumerate(self._ROW_LABELS):
+        for ri, (section, item) in enumerate(row_labels):
             row = [section, item]
             for entry in self._models:
-                raw = entry.get(keys[ri])
-                row.append(str(raw) if raw is not None else "—")
+                row.append(self._cell_value(entry, ri))
             lines.append("\t".join(row))
         return "\n".join(lines)
 
@@ -1516,7 +2056,7 @@ class ReportPanel(QWidget):
             self, "Excel 저장", f"report_{brand}_{model}.xlsx", "Excel (*.xlsx)"
         )
         if path:
-            ExcelExporter().export_report_template(self._models, file_path=path)
+            ExcelExporter().export_report_template(brand, model, file_path=path)
             QMessageBox.information(self, "저장 완료", f"저장됨: {path}")
 
     # ── 파일 불러오기 ────────────────────────────────────────────────────
@@ -1554,6 +2094,12 @@ class ReportPanel(QWidget):
             "contrast_ratio": None, "black_lv": None,
             "dci_overlap": None, "bt2020_overlap": None,
             "apl_hdr": {}, "apl_sdr": {}, "gamut_uv": {},
+            # per-mode (광학 측정 데이터 format)
+            "sdr_vivid_10": None,    "sdr_vivid_100": None,
+            "sdr_standard_10": None, "sdr_standard_100": None,
+            "hdr_vivid_10": None,    "hdr_vivid_100": None,
+            "hdr_standard_10": None, "hdr_standard_100": None,
+            "hdr_cinema_10": None,   "hdr_cinema_100": None,
         }
         self._models.append(entry)
         color = self._model_colors[key]
@@ -1606,11 +2152,28 @@ class ReportPanel(QWidget):
                     brand = brand or "Unknown"
                     model = model or basename
 
+            # 시퀀스 자동 감지 보완 — all 파일은 여러 시트를 포함
+            if not sequence:
+                if any(s.startswith("Loading_") for s in sheet_names):
+                    sequence = "All Sessions"
+                elif "Summary" in sheet_names and any(s.startswith("Raw_") for s in sheet_names):
+                    sequence = "Luminance Loading"
+                elif any(s.startswith("Gamut") for s in sheet_names):
+                    sequence = "Gamut"
+                else:
+                    raise ValueError(f"파일 형식을 인식할 수 없습니다 (시트: {sheet_names})")
+
             entry = self._find_or_create_entry(brand, model)
 
-            if "Luminance Loading" in sequence:
-                is_hdr = "hdr" in os.path.basename(path).lower()
-                self._parse_lum_loading_wb(wb, entry, is_hdr)
+            if "All Sessions" in sequence:
+                self._parse_all_sessions_wb(wb, entry)
+            elif "Luminance Loading" in sequence:
+                basename_lower = os.path.basename(path).lower()
+                is_hdr = "hdr" in basename_lower
+                mode = ("cinema" if "cinema" in basename_lower
+                        else "standard" if ("standard" in basename_lower or "_std_" in basename_lower)
+                        else "vivid")
+                self._parse_lum_loading_wb(wb, entry, is_hdr, mode=mode)
             elif "Gamut" in sequence:
                 self._parse_gamut_wb(wb, entry)
             else:
@@ -1618,7 +2181,8 @@ class ReportPanel(QWidget):
         finally:
             wb.close()
 
-    def _parse_lum_loading_wb(self, wb: Any, entry: Dict, is_hdr: bool) -> None:
+    def _parse_lum_loading_wb(self, wb: Any, entry: Dict, is_hdr: bool,
+                              mode: str = "") -> None:
         sheet_names = wb.sheetnames
         raw_sheets = [s for s in sheet_names if s.startswith("Raw_")]
         agg = self._agg_combo.currentText()  # "최대값" / "중간값" / "최소값"
@@ -1664,16 +2228,29 @@ class ReportPanel(QWidget):
 
         if is_hdr:
             entry["apl_hdr"].update(apl_dict)
-            if 10 in apl_dict:
-                entry["hdr_10"] = apl_dict[10]
-            if 100 in apl_dict:
-                entry["hdr_100"] = apl_dict[100]
+            if 10  in apl_dict: entry["hdr_10"]  = apl_dict[10]
+            if 100 in apl_dict: entry["hdr_100"] = apl_dict[100]
         else:
             entry["apl_sdr"].update(apl_dict)
-            if 10 in apl_dict:
-                entry["sdr_10"] = apl_dict[10]
-            if 100 in apl_dict:
-                entry["sdr_100"] = apl_dict[100]
+            if 10  in apl_dict: entry["sdr_10"]  = apl_dict[10]
+            if 100 in apl_dict: entry["sdr_100"] = apl_dict[100]
+
+        # per-mode keys (광학 측정 데이터 format)
+        m = mode.lower()
+        if is_hdr:
+            if "cinema" in m:
+                pfx = "hdr_cinema"
+            elif "standard" in m or "std" in m:
+                pfx = "hdr_standard"
+            else:
+                pfx = "hdr_vivid"
+        else:
+            if "standard" in m or "std" in m:
+                pfx = "sdr_standard"
+            else:
+                pfx = "sdr_vivid"
+        if 10  in apl_dict: entry[f"{pfx}_10"]  = apl_dict[10]
+        if 100 in apl_dict: entry[f"{pfx}_100"] = apl_dict[100]
 
     def _parse_gamut_wb(self, wb: Any, entry: Dict) -> None:
         try:
@@ -1705,18 +2282,134 @@ class ReportPanel(QWidget):
             entry["dci_overlap"] = stats.get("dci_overlap")
             entry["bt2020_overlap"] = stats.get("bt2020_overlap")
 
+    def _parse_all_sessions_wb(self, wb: Any, entry: Dict) -> None:
+        """_all.xlsx 파싱 — Loading_*, Gamut_* 시트를 자동 감지해 데이터 추출.
+
+        시트별 컬럼 구조 (export_all_session 기준):
+          Loading_SDR_Vivid : APL(0) | #(1) | Time(2) | Lv(3) | x(4) | y(5) | u'(6) | ...
+          Gamut_SDR/HDR     : Color(0) | Time(1) | Lv(2) | x(3) | y(4) | u'(5) | v'(6) | ...
+        """
+        sheet_names = wb.sheetnames
+        agg = self._agg_combo.currentText()
+        label_map = {"Red": "red", "Green": "green", "Blue": "blue",
+                     "White": "white", "Black": "black"}
+
+        # ── Loading_* 시트 ────────────────────────────────────────────────
+        loading_sheets = [s for s in sheet_names if s.startswith("Loading_Raw_")
+                          or (s.startswith("Loading_") and not s == "Loading_Summary")]
+        for sheet_name in loading_sheets:
+            # 시트명에서 모드 판단: Loading_HDR_Vivid → HDR, Loading_SDR_Vivid → SDR
+            upper = sheet_name.upper()
+            is_hdr    = "_HDR_" in upper or upper.endswith("_HDR")
+            is_cinema = "CINEMA"   in upper
+            is_std    = "STANDARD" in upper or "_STD_" in upper
+
+            apl_lv: Dict[int, List[float]] = {}
+            ws = wb[sheet_name]
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or row[0] is None:
+                    continue
+                try:
+                    apl = round(int(float(row[0])))
+                    lv  = float(row[3])   # APL(0) | #(1) | Time(2) | Lv(3)
+                except (TypeError, ValueError, IndexError):
+                    continue
+                apl_lv.setdefault(apl, []).append(lv)
+
+            apl_dict: Dict[int, float] = {}
+            for apl, lvs in apl_lv.items():
+                if agg == "최대값":
+                    apl_dict[apl] = round(max(lvs), 3)
+                elif agg == "최소값":
+                    apl_dict[apl] = round(min(lvs), 3)
+                else:
+                    apl_dict[apl] = round(statistics.median(lvs), 3)
+
+            if is_hdr:
+                entry["apl_hdr"].update(apl_dict)
+                if 10  in apl_dict: entry["hdr_10"]  = apl_dict[10]
+                if 100 in apl_dict: entry["hdr_100"] = apl_dict[100]
+                if is_cinema:
+                    pfx = "hdr_cinema"
+                elif is_std:
+                    pfx = "hdr_standard"
+                else:
+                    pfx = "hdr_vivid"
+            else:
+                entry["apl_sdr"].update(apl_dict)
+                if 10  in apl_dict: entry["sdr_10"]  = apl_dict[10]
+                if 100 in apl_dict: entry["sdr_100"] = apl_dict[100]
+                pfx = "sdr_standard" if is_std else "sdr_vivid"
+            if 10  in apl_dict: entry[f"{pfx}_10"]  = apl_dict[10]
+            if 100 in apl_dict: entry[f"{pfx}_100"] = apl_dict[100]
+
+        # ── Gamut_* 시트 ──────────────────────────────────────────────────
+        gamut_sheets = [s for s in sheet_names if s.startswith("Gamut_")]
+        for sheet_name in gamut_sheets:
+            ws = wb[sheet_name]
+            for row in ws.iter_rows(min_row=2, max_row=7, values_only=True):
+                if not row or row[0] is None:
+                    continue
+                color_label = label_map.get(str(row[0]).strip().capitalize())
+                if color_label is None:
+                    continue
+                try:
+                    u_prime = float(row[5])   # Color(0)|Time(1)|Lv(2)|x(3)|y(4)|u'(5)|v'(6)
+                    v_prime = float(row[6])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                entry["gamut_uv"][color_label] = (u_prime, v_prime)
+
+        uv = entry["gamut_uv"]
+        if "red" in uv and "green" in uv and "blue" in uv:
+            stats = calc_gamut_stats(uv["red"], uv["green"], uv["blue"])
+            entry["dci_overlap"]   = stats.get("dci_overlap")
+            entry["bt2020_overlap"] = stats.get("bt2020_overlap")
+
+        # ── Contrast_* 시트 ───────────────────────────────────────────────
+        # CR 기준: Full White Lv / Black 100% window Lv (가장 높은 CR 수치)
+        # 컬럼 구조 (export_all_session 기준):
+        #   Black H/V %(0) | Lv(1) | CR(2) | Time(3) | Lv_col(4) | ...
+        contrast_sheets = [s for s in sheet_names if s.startswith("Contrast_")]
+        for sheet_name in contrast_sheets:
+            ws = wb[sheet_name]
+            white_lv: float | None = None
+            black100_lv: float | None = None
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or row[0] is None:
+                    continue
+                try:
+                    label = str(row[0]).strip()
+                    lv = float(row[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if label == "Full White":
+                    white_lv = lv
+                else:
+                    try:
+                        side = float(label)
+                        if abs(side - 100.0) < 0.1:
+                            black100_lv = lv
+                    except ValueError:
+                        pass
+            if white_lv and black100_lv and black100_lv > 0:
+                entry["contrast_ratio"] = round(white_lv / black100_lv, 1)
+                entry["black_lv"] = round(black100_lv, 4)
+
     # ── 차트 헬퍼 ────────────────────────────────────────────────────────
 
     def _add_ref_gamuts(self) -> None:
-        for ref_pts, color, name in [
-            (DCI_P3_UV, QColor("#4f8ef7"), "DCI-P3"),
-            (BT2020_UV, QColor("#aab0c0"), "BT.2020"),
+        for ref_pts, color, name, dash in [
+            (DCI_P3_UV, QColor("#aab0c0"), "DCI-P3",  True),
+            (BT2020_UV, QColor("#aab0c0"), "BT.2020", False),
         ]:
             series = QLineSeries()
             series.setName(name)
             pen = series.pen()
             pen.setColor(color)
             pen.setWidth(1)
+            if dash:
+                pen.setStyle(Qt.DashLine)
             series.setPen(pen)
             for u, v in ref_pts:
                 series.append(u, v)
@@ -1772,8 +2465,6 @@ class ReportPanel(QWidget):
             "red":   QColor("#e74c3c"),
             "green": QColor("#27ae60"),
             "blue":  QColor("#4f8ef7"),
-            "white": QColor("#888899"),
-            "black": QColor("#aab0c0"),
         }
 
         for entry in self._models:
@@ -1783,7 +2474,7 @@ class ReportPanel(QWidget):
             model_key = f"{entry['brand']}_{entry['model']}"
             color_hex = self._model_colors.get(model_key, _DEFAULT_MODEL_COLORS[0])
 
-            # R→G→B→R 삼각형 라인
+            # R→G→B→R 삼각형 라인 (범례에 brand_model로 표시)
             if "red" in uv and "green" in uv and "blue" in uv:
                 tri = QLineSeries()
                 tri.setName(f"{entry['brand']}_{entry['model']}")
@@ -1798,18 +2489,24 @@ class ReportPanel(QWidget):
                 tri.attachAxis(self._gamut_axis_u)
                 tri.attachAxis(self._gamut_axis_v)
 
-            # 각 색 포인트 ScatterSeries
-            for color_key, (u, v) in uv.items():
+            # R/G/B 포인트만 표시 (white/black 제거), 범례에서는 숨김
+            for color_key in ("red", "green", "blue"):
+                if color_key not in uv:
+                    continue
+                u, v = uv[color_key]
                 dot = QScatterSeries()
                 dot.setName(color_key)
                 dot.setMarkerSize(10.0)
-                dot_color = _SCATTER_COLOR.get(color_key, QColor("#888899"))
+                dot_color = _SCATTER_COLOR[color_key]
                 dot.setColor(dot_color)
                 dot.setBorderColor(dot_color)
                 dot.append(u, v)
                 self._gamut_chart.addSeries(dot)
                 dot.attachAxis(self._gamut_axis_u)
                 dot.attachAxis(self._gamut_axis_v)
+                # 범례에서 R/G/B 개별 점 항목 숨김
+                for marker in self._gamut_chart.legend().markers(dot):
+                    marker.setVisible(False)
 
 
 # ---------------------------------------------------------------------------
@@ -1820,7 +2517,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("패널 측정 프로그램 v0.1")
-        self.resize(1280, 1500)  # 가로 x 세로
+        self.setMinimumSize(1024, 1000) # 프로그램 전체 크기 조절
         self.setStyleSheet(_DARK_STYLE)
 
         self._engine = MeasurementEngine()
@@ -1876,7 +2573,7 @@ class MainWindow(QMainWindow):
         self._sidebar.setCurrentRow(0)
 
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage("준비 — Mock 장비 연결 후 시작하세요")
+        self.statusBar().showMessage("준비 — 장비를 연결하세요")
 
     def closeEvent(self, event: Any) -> None:
         self._engine.disconnect_all()

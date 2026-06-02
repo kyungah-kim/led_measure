@@ -9,17 +9,19 @@
     --bg: #0f1117; --card: #1a1d27; --border: #2d3145;
     --accent: #4f8ef7; --green: #3dd68c; --red: #f75f5f;
     --yellow: #f7c94f; --text: #e2e4ed; --muted: #7a7e99;
+    --orange: #f7a14f;
   }
   body { margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
   h1 { margin: 0; font-size: 18px; font-weight: 600; }
   h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
-  .topbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+  .topbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
   .badge-ok { background: #1a3a2a; color: var(--green); }
   .badge-err { background: #3a1a1a; color: var(--red); }
   .badge-idle { background: #232638; color: var(--muted); }
+  .badge-mock { background: #2a2a10; color: var(--yellow); }
   .layout { display: flex; height: calc(100vh - 53px); }
-  .sidebar { width: 210px; background: var(--card); border-right: 1px solid var(--border); padding: 16px 0; flex-shrink: 0; }
+  .sidebar { width: 220px; background: var(--card); border-right: 1px solid var(--border); padding: 16px 0; flex-shrink: 0; overflow-y: auto; }
   .sidebar-item { padding: 10px 20px; cursor: pointer; border-left: 3px solid transparent; transition: background .15s; color: var(--muted); font-weight: 500; }
   .sidebar-item:hover { background: rgba(79,142,247,.07); color: var(--text); }
   .sidebar-item.active { border-left-color: var(--accent); background: rgba(79,142,247,.1); color: var(--accent); }
@@ -35,6 +37,7 @@
   .btn-primary { background: var(--accent); color: #fff; }
   .btn-green { background: var(--green); color: #0f1117; }
   .btn-red { background: var(--red); color: #fff; }
+  .btn-yellow { background: var(--yellow); color: #0f1117; }
   .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
   .step-panel { display: none; }
   .step-panel.active { display: block; }
@@ -42,18 +45,20 @@
   .progress-bar { height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
   #log { background: #090b12; border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; height: 200px; overflow-y: auto; color: #a0f0c0; white-space: pre-wrap; }
   .chart-wrap { background: #090b12; border: 1px solid var(--border); border-radius: 6px; height: 240px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; position: relative; overflow: hidden; }
-  canvas#lum-chart { width: 100% !important; height: 100% !important; }
+  .chart-wrap canvas { width: 100% !important; height: 100% !important; display: block; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th { background: #12151f; color: var(--muted); font-weight: 600; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
   td { padding: 5px 10px; border-bottom: 1px solid var(--border); }
   tr:last-child td { border-bottom: none; }
   .row-seq { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   .tag { font-size: 11px; background: rgba(79,142,247,.12); color: var(--accent); padding: 2px 7px; border-radius: 3px; }
-  #status-bar { font-size: 12px; color: var(--muted); padding: 4px 0; }
+  #status-bar { font-size: 12px; color: var(--muted); padding: 4px 0; margin-left: auto; }
   select[multiple] { height: auto; }
   .switch-group { display: flex; gap: 8px; }
   .switch-btn { padding: 5px 12px; border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 4px; cursor: pointer; font-size: 12px; }
   .switch-btn.on { background: rgba(79,142,247,.15); border-color: var(--accent); color: var(--accent); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -62,22 +67,23 @@
   <h1>📡 패널 측정 프로그램</h1>
   <span class="badge badge-idle" id="meter-badge">CA: 미연결</span>
   <span class="badge badge-idle" id="gen-badge">VG: 미연결</span>
-  <span style="margin-left:auto;font-size:12px;color:var(--muted);" id="status-bar">대기 중</span>
+  <span id="status-bar">대기 중</span>
 </div>
 
 <div class="layout">
   <nav class="sidebar">
-    <div class="sidebar-item active" onclick="showPanel('connect')">🔌 장비 연결</div>
-    <div class="sidebar-item" onclick="showPanel('center')">🎯 1. 센터 맞추기</div>
-    <div class="sidebar-item" onclick="showPanel('lum_swing')">📈 2. 휘도 스윙</div>
-    <div class="sidebar-item" onclick="showPanel('lum_loading')">📊 3. APL 로딩</div>
-    <div class="sidebar-item" onclick="showPanel('gamut')">🎨 4. 색재현율</div>
-    <div class="sidebar-item" onclick="showPanel('contrast')">⬛ 5. 명암비</div>
+    <div class="sidebar-item active" onclick="showPanel('connect',this)">🔌 장비 연결</div>
+    <div class="sidebar-item" onclick="showPanel('center',this)">🎯 1. 센터 맞추기</div>
+    <div class="sidebar-item" onclick="showPanel('lum_swing',this)">📈 2. 휘도 스윙</div>
+    <div class="sidebar-item" onclick="showPanel('lum_loading',this)">📊 3. APL 로딩</div>
+    <div class="sidebar-item" onclick="showPanel('gamut',this)">🎨 4. 색재현율</div>
+    <div class="sidebar-item" onclick="showPanel('contrast',this)">⬛ 5. 명암비</div>
+    <div class="sidebar-item" onclick="showPanel('report',this)">📋 보고서 템플릿</div>
   </nav>
 
   <div class="main">
 
-    <!-- 장비 연결 -->
+    <!-- ═══ 장비 연결 ═══════════════════════════════════════════════════ -->
     <div class="step-panel active" id="panel-connect">
       <div class="card">
         <h2>기본 정보</h2>
@@ -89,7 +95,13 @@
       <div class="card">
         <h2>CA 색채휘도계</h2>
         <div class="form-row">
-          <div class="form-group"><label>포트</label><input type="text" id="meter-port" value="COM3" placeholder="COM3 또는 /dev/ttyUSB0"></div>
+          <div class="form-group">
+            <label>포트</label>
+            <div style="display:flex;gap:4px;">
+              <select id="meter-port" style="width:160px;"></select>
+              <input type="text" id="meter-port-manual" placeholder="직접 입력" style="width:130px;">
+            </div>
+          </div>
           <div class="form-group"><label>모델</label>
             <select id="meter-model"><option>CA-410</option><option>CA-310</option></select>
           </div>
@@ -98,27 +110,48 @@
       <div class="card">
         <h2>패턴 제너레이터</h2>
         <div class="form-row">
-          <div class="form-group"><label>포트</label><input type="text" id="gen-port" value="COM4" placeholder="COM4 또는 /dev/ttyUSB1"></div>
+          <div class="form-group">
+            <label>포트</label>
+            <div style="display:flex;gap:4px;">
+              <select id="gen-port" style="width:160px;"></select>
+              <input type="text" id="gen-port-manual" placeholder="직접 입력" style="width:130px;">
+            </div>
+          </div>
           <div class="form-group"><label>모델</label>
             <select id="gen-model"><option>VG-879</option><option>VG-876</option></select>
           </div>
         </div>
       </div>
-      <button class="btn btn-primary" onclick="doConnect()">연결</button>
-      <button class="btn btn-outline" style="margin-left:8px" onclick="checkStatus()">상태 확인</button>
-      <div id="connect-result" style="margin-top:10px;font-size:13px;"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
+        <button class="btn btn-primary" onclick="doConnect()">연결</button>
+        <button class="btn btn-outline" onclick="scanPorts()">🔍 포트 스캔</button>
+        <button class="btn btn-outline" onclick="checkStatus()">상태 확인</button>
+        <button class="btn btn-yellow" onclick="doMockConnect()" title="실제 장비 없이 테스트">🧪 Mock 연결</button>
+        <button class="btn btn-outline" onclick="doDisconnect()" style="color:var(--red);border-color:var(--red);">연결 해제</button>
       </div>
-      <div class="card" style="border-color:#f7c94f33;">
-        <h2 style="color:var(--yellow);">테스트 모드 (Mock 연결)</h2>
-        <p style="color:var(--muted);font-size:12px;margin-bottom:12px;">실제 장비 없이 Mock 장비로 연결합니다. 모든 측정값은 시뮬레이션됩니다.</p>
-        <button class="btn" style="background:#3a2f00;border:1px solid var(--yellow);color:var(--yellow);" onclick="doConnectMock()">🔧 Mock 연결</button>
-        <div id="mock-result" style="margin-top:8px;font-size:13px;"></div>
+      <div id="connect-result" style="margin-top:6px;font-size:13px;"></div>
+      <div class="card" style="margin-top:12px;padding:14px 16px;">
+        <h2 style="margin-bottom:10px;">자동 저장</h2>
+        <div class="form-row" style="align-items:flex-end;gap:8px;">
+          <div class="form-group" style="flex:1;min-width:200px;">
+            <label>서버 저장 폴더 경로</label>
+            <input type="text" id="auto-save-dir" placeholder="/home/user/measurements  (비워두면 비활성화)" style="width:100%;">
+          </div>
+          <button class="btn btn-primary" style="white-space:nowrap;" onclick="setAutoSaveDir()">적용</button>
+        </div>
+        <div id="auto-save-status" style="font-size:12px;color:var(--muted);margin-top:6px;">자동 저장 비활성화 — 폴더를 지정하면 각 측정 완료 시 자동 저장됩니다.</div>
+      </div>
     </div>
 
-    <!-- 센터 맞추기 -->
+    <!-- ═══ 센터 맞추기 ═══════════════════════════════════════════════ -->
     <div class="step-panel" id="panel-center">
       <div class="card">
         <h2>센터 맞추기</h2>
+        <div style="background:#2a2500;border:1px solid #f0c04066;border-radius:5px;padding:10px 14px;color:#f7c94f;font-size:12px;margin-bottom:14px;line-height:1.7;">
+          ⚠&nbsp; 패턴 출력 전 TV 설정 확인<br>
+          &nbsp;&nbsp;&nbsp;• Aspect Ratio : Original<br>
+          &nbsp;&nbsp;&nbsp;• Just Scan : On
+        </div>
         <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">
           패턴 제너레이터에서 네모-abc 패턴을 출력하여 측정기 렌즈가 화면 중심을 향하도록 조정합니다.
         </p>
@@ -130,34 +163,59 @@
       </div>
     </div>
 
-    <!-- 휘도 스윙 -->
+    <!-- ═══ 휘도 스윙 ══════════════════════════════════════════════════ -->
     <div class="step-panel" id="panel-lum_swing">
-      <div class="card">
-        <h2>케이스 선택</h2>
-        <div class="row-seq">
-          <div class="form-group"><label>케이스</label>
-            <select id="swing-case"><option value="A">A (SDR)</option><option value="B">B (HDR)</option><option value="C">C (HDR)</option></select>
+      <div class="card" style="padding-bottom:10px;">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+          <span style="font-size:14px;font-weight:600;">📈 휘도 스윙</span>
+          <div class="form-group" style="flex-direction:row;align-items:center;gap:4px;">
+            <label style="margin:0;">PSM</label>
+            <select id="swing-case" style="width:100px;">
+              <option value="Vivid">Vivid</option>
+              <option value="Standard">Standard</option>
+              <option value="Cinema">Cinema</option>
+            </select>
           </div>
-          <div class="form-group"><label>HDR 자동 전환</label>
-            <div class="switch-group">
-              <button class="switch-btn" id="swing-hdr-off" onclick="setSwingHdr(false)">SDR</button>
-              <button class="switch-btn on" id="swing-hdr-on" onclick="setSwingHdr(true)">HDR</button>
-            </div>
+          <div class="switch-group">
+            <button class="switch-btn on" id="swing-hdr-off" onclick="setSwingHdr(false)">SDR</button>
+            <button class="switch-btn" id="swing-hdr-on" onclick="setSwingHdr(true)">HDR</button>
           </div>
           <button class="btn btn-primary" onclick="startSwing()">▶ 시작</button>
           <button class="btn btn-red" onclick="stopSeq()">■ 중지</button>
+          <button class="btn btn-outline" onclick="clearSwing()">🗑 초기화</button>
           <button class="btn btn-outline" onclick="exportResult('lum_swing')">💾 Excel 저장</button>
         </div>
-        <div class="progress-bar-wrap"><div class="progress-bar" id="swing-prog" style="width:0%"></div></div>
-        <div class="chart-wrap"><canvas id="lum-chart"></canvas></div>
+        <div class="progress-bar-wrap" style="margin-bottom:4px;">
+          <div class="progress-bar" id="swing-prog" style="width:0%"></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;" id="swing-status">대기 중</div>
+        <!-- SDR / HDR 차트 나란히 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:2px;">SDR</div>
+            <div class="chart-wrap" style="height:220px;"><canvas id="swing-chart-sdr"></canvas></div>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:2px;">HDR</div>
+            <div class="chart-wrap" style="height:220px;"><canvas id="swing-chart-hdr"></canvas></div>
+          </div>
+        </div>
+        <!-- 범례 -->
+        <div style="display:flex;gap:16px;margin-top:6px;font-size:11px;">
+          <span><span style="color:#e74c3c;">──</span> Vivid</span>
+          <span><span style="color:#4f8ef7;">──</span> Standard</span>
+          <span><span style="color:#27ae60;">──</span> Cinema</span>
+        </div>
       </div>
       <div class="card">
-        <h2>측정값</h2>
-        <div id="swing-table-wrap"></div>
+        <h2>측정값 (전체 이력)</h2>
+        <div style="max-height:260px;overflow-y:auto;" id="swing-table-wrap">
+          <span style="color:var(--muted);font-size:12px;">측정 시작 후 값이 쌓입니다.</span>
+        </div>
       </div>
     </div>
 
-    <!-- APL 로딩 -->
+    <!-- ═══ APL 로딩 ═══════════════════════════════════════════════════ -->
     <div class="step-panel" id="panel-lum_loading">
       <div class="card">
         <h2>설정</h2>
@@ -170,7 +228,11 @@
             </select>
           </div>
           <div class="form-group"><label>케이스</label>
-            <select id="load-case"><option>A</option><option>B</option><option>C</option></select>
+            <select id="load-case">
+              <option value="Vivid">Vivid</option>
+              <option value="Standard">Standard</option>
+              <option value="Cinema">Cinema</option>
+            </select>
           </div>
           <div class="form-group"><label>HDR</label>
             <div class="switch-group">
@@ -178,10 +240,29 @@
               <button class="switch-btn" id="load-hdr-on" onclick="setLoadHdr(true)">HDR</button>
             </div>
           </div>
-          <div class="form-group"><label>쿨링 (APL≤10)</label>
+          <div class="form-group"><label>측정 횟수</label>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <input type="number" id="load-meas-count" value="1" min="1" max="10" style="width:60px;text-align:center;">
+              <span style="font-size:12px;color:var(--muted);">회</span>
+            </div>
+          </div>
+          <div class="form-group"><label>쿨링</label>
             <div class="switch-group">
               <button class="switch-btn on" id="cool-off" onclick="setCooling(false)">Off</button>
               <button class="switch-btn" id="cool-on" onclick="setCooling(true)">On</button>
+            </div>
+          </div>
+          <div class="form-group" id="cool-apl-group" style="display:none;"><label>APL 임계값</label>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <span style="font-size:12px;color:var(--muted);">APL &lt;</span>
+              <input type="number" id="load-cool-apl" value="10" min="1" max="100" style="width:60px;text-align:center;">
+              <span style="font-size:12px;color:var(--muted);">%</span>
+            </div>
+          </div>
+          <div class="form-group" id="cool-sec-group" style="display:none;"><label>쿨링 시간</label>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <input type="number" id="load-cool-sec" value="5" min="1" max="60" style="width:60px;text-align:center;">
+              <span style="font-size:12px;color:var(--muted);">초 Black 출력</span>
             </div>
           </div>
           <div class="form-group"><label>결과값</label>
@@ -201,37 +282,113 @@
       </div>
       <div class="card">
         <h2>APL 측정 결과</h2>
-        <div id="load-table-wrap"></div>
+        <div id="load-table-wrap" style="overflow-x:auto;"></div>
+      </div>
+      <div class="card">
+        <h2>APL 로딩 차트</h2>
+        <div class="two-col">
+          <div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">SDR</div>
+            <div class="chart-wrap" style="height:220px;"><canvas id="apl-chart-sdr"></canvas></div>
+          </div>
+          <div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">HDR</div>
+            <div class="chart-wrap" style="height:220px;"><canvas id="apl-chart-hdr"></canvas></div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 색재현율 -->
+    <!-- ═══ 색재현율 ════════════════════════════════════════════════════ -->
     <div class="step-panel" id="panel-gamut">
       <div class="card">
         <h2>색재현율 측정</h2>
-        <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Full Pattern (100%) — R → G → B → W → BK 순 자동 측정</p>
-        <button class="btn btn-primary" onclick="startGamut()">▶ 측정 시작</button>
-        <button class="btn btn-outline" style="margin-left:8px" onclick="exportResult('gamut')">💾 Excel 저장</button>
+        <div class="row-seq">
+          <p style="color:var(--muted);font-size:13px;margin:0;">Full Pattern (100%) — R → G → B → W → BK 순 자동 측정</p>
+          <div class="form-group"><label>HDR</label>
+            <div class="switch-group">
+              <button class="switch-btn on" id="gamut-hdr-off" onclick="setGamutHdr(false)">SDR</button>
+              <button class="switch-btn" id="gamut-hdr-on" onclick="setGamutHdr(true)">HDR</button>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="startGamut()">▶ 측정 시작</button>
+          <button class="btn btn-red" onclick="stopSeq()">■ 중지</button>
+          <button class="btn btn-outline" onclick="exportResult('gamut')">💾 Excel 저장</button>
+        </div>
         <div class="progress-bar-wrap"><div class="progress-bar" id="gamut-prog" style="width:0%"></div></div>
+        <div id="gamut-status" style="font-size:11px;color:var(--muted);margin-top:4px;">대기 중</div>
       </div>
-      <div class="card">
-        <h2>결과</h2>
-        <div id="gamut-table-wrap"></div>
+      <div class="two-col">
+        <div class="card">
+          <h2>결과 테이블</h2>
+          <div id="gamut-table-wrap" style="overflow-x:auto;"></div>
+        </div>
+        <div class="card">
+          <h2>u'v' 색도 차트</h2>
+          <div class="chart-wrap" style="height:300px;"><canvas id="uv-chart"></canvas></div>
+          <div style="margin-top:8px;font-size:11px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;">
+            <span style="color:#4f8ef7;">— DCI-P3</span>
+            <span style="color:#7a7e99;">— BT.2020</span>
+            <span style="color:#f75f5f;">● Red</span>
+            <span style="color:#3dd68c;">● Green</span>
+            <span style="color:#6699ff;">● Blue</span>
+          </div>
+          <div style="margin-top:6px;font-size:12px;color:var(--text);">
+            <span id="gamut-dci-label" style="font-weight:600;margin-right:16px;">DCI-P3: —</span>
+            <span id="gamut-bt2020-label" style="font-weight:600;">BT.2020: —</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 명암비 -->
+    <!-- ═══ 명암비 ══════════════════════════════════════════════════════ -->
     <div class="step-panel" id="panel-contrast">
       <div class="card">
         <h2>명암비 (CR) 측정</h2>
-        <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">White Raster + Black Window — 100% / 50% / 20% / 14.1% / 0% 순 측정</p>
-        <button class="btn btn-primary" onclick="startContrast()">▶ 측정 시작</button>
-        <button class="btn btn-outline" style="margin-left:8px" onclick="exportResult('contrast')">💾 Excel 저장</button>
+        <div class="row-seq">
+          <p style="color:var(--muted);font-size:13px;margin:0;">Full White → Black Window 100% → 50% → 20% → 14.1% 순 측정</p>
+          <div class="form-group"><label>HDR</label>
+            <div class="switch-group">
+              <button class="switch-btn on" id="contrast-hdr-off" onclick="setContrastHdr(false)">SDR</button>
+              <button class="switch-btn" id="contrast-hdr-on" onclick="setContrastHdr(true)">HDR</button>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="startContrast()">▶ 측정 시작</button>
+          <button class="btn btn-red" onclick="stopSeq()">■ 중지</button>
+          <button class="btn btn-outline" onclick="exportResult('contrast')">💾 Excel 저장</button>
+        </div>
         <div class="progress-bar-wrap"><div class="progress-bar" id="contrast-prog" style="width:0%"></div></div>
+        <div id="contrast-status" style="font-size:11px;color:var(--muted);margin-top:4px;">대기 중</div>
       </div>
       <div class="card">
         <h2>결과</h2>
-        <div id="contrast-table-wrap"></div>
+        <div id="contrast-table-wrap" style="overflow-x:auto;"></div>
+      </div>
+    </div>
+
+    <!-- ═══ 보고서 템플릿 ════════════════════════════════════════════════ -->
+    <div class="step-panel" id="panel-report">
+      <div class="card">
+        <h2>보고서 템플릿 업로드</h2>
+        <div class="form-row" style="margin-bottom:16px;">
+          <div class="form-group">
+            <label>템플릿 형식</label>
+            <select id="report-type">
+              <option value="competitor">경쟁사 비교 장표</option>
+              <option value="optical">광학 측정 데이터</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>xlsx 파일 선택</label>
+            <input type="file" id="report-file" accept=".xlsx,.xls" style="width:auto;background:transparent;border:none;color:var(--text);padding:0;">
+          </div>
+          <button class="btn btn-primary" onclick="loadReportTemplate()">📂 템플릿 로드</button>
+        </div>
+        <div id="report-status" style="font-size:13px;color:var(--muted);">xlsx 파일을 업로드하면 항목이 표시됩니다.</div>
+      </div>
+      <div class="card" id="report-table-card" style="display:none;">
+        <h2>템플릿 미리보기</h2>
+        <div id="report-table-wrap"></div>
       </div>
     </div>
 
@@ -244,33 +401,53 @@
       <div id="log"></div>
     </div>
 
-  </div>
-</div>
+  </div><!-- .main -->
+</div><!-- .layout -->
 
 <script>
-// ── 상태 ───────────────────────────────────────────────────────────
-let _swingHdr = true, _loadHdr = false, _cooling = false, _useAvg = true;
+// ════════════════════════════════════════════════════════════════════════
+// 상태
+// ════════════════════════════════════════════════════════════════════════
+let _swingHdr = false, _loadHdr = false, _gamutHdr = false, _contrastHdr = false;
+let _cooling = false, _useAvg = true;
 let _sseSource = null;
-let _chartData = [];    // {t_ms, Lv}[]
-let _chartCtx = null;
 
-// ── 패널 전환 ──────────────────────────────────────────────────────
-function showPanel(name) {
-  document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
-  document.getElementById('panel-' + name).classList.add('active');
-  event.currentTarget.classList.add('active');
+// APL 차트 데이터: {sdr: {case: [{apl, Lv}]}, hdr: {...}}
+let _aplChartData = { sdr: {}, hdr: {} };
+
+// u'v' chart data
+let _uvPoints = [];
+
+// ════════════════════════════════════════════════════════════════════════
+// 유틸
+// ════════════════════════════════════════════════════════════════════════
+function _tsToTime(ms) {
+  const d = new Date(ms);
+  return d.toTimeString().slice(0, 8);
 }
 
-// ── 로그 ──────────────────────────────────────────────────────────
 function log(msg) {
   const el = document.getElementById('log');
-  const ts = new Date().toTimeString().slice(0,8);
+  const ts = new Date().toTimeString().slice(0, 8);
   el.textContent += `[${ts}] ${msg}\n`;
   el.scrollTop = el.scrollHeight;
 }
+
 function setStatus(msg) { document.getElementById('status-bar').textContent = msg; }
 
+// ════════════════════════════════════════════════════════════════════════
+// 패널 전환
+// ════════════════════════════════════════════════════════════════════════
+function showPanel(name, el) {
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  if (el) el.classList.add('active');
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// HDR 전환
+// ════════════════════════════════════════════════════════════════════════
 async function applyHdr(enabled) {
   setStatus(enabled ? 'HDR 전환 중...' : 'SDR 전환 중...');
   try {
@@ -289,15 +466,54 @@ async function applyHdr(enabled) {
   }
 }
 
-// ── 장비 연결 ─────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// 포트 스캔
+// ════════════════════════════════════════════════════════════════════════
+function _getPort(selectId, manualId) {
+  const manual = document.getElementById(manualId).value.trim();
+  if (manual) return manual;
+  return document.getElementById(selectId).value || '';
+}
+
+function _populatePortSelect(selectId, ports, preferred) {
+  const sel = document.getElementById(selectId);
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">-- 선택 --</option>' +
+    ports.map(p => `<option value="${p}"${p === (preferred || prev) ? ' selected' : ''}>${p}</option>`).join('');
+}
+
+async function scanPorts() {
+  setStatus('포트 스캔 중...');
+  try {
+    const r = await fetch('/api/ports');
+    const d = await r.json();
+    if (!d.ok) { log('포트 스캔 오류: ' + d.error); setStatus('포트 스캔 실패'); return; }
+    const ports = d.ports;
+    _populatePortSelect('meter-port', ports, null);
+    _populatePortSelect('gen-port', ports, null);
+    if (ports.length === 0) {
+      log('감지된 포트 없음');
+      document.getElementById('connect-result').innerHTML = '<span style="color:var(--muted)">감지된 포트가 없습니다</span>';
+    } else {
+      log('포트 스캔 완료: ' + ports.join(', '));
+      document.getElementById('connect-result').innerHTML =
+        '<span style="color:var(--green)">🔍 ' + ports.length + '개 포트 감지됨: ' + ports.join(', ') + '</span>';
+    }
+    setStatus('포트 스캔 완료');
+  } catch(e) { log('포트 스캔 오류: ' + e); }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 장비 연결 / 해제 / Mock
+// ════════════════════════════════════════════════════════════════════════
 async function doConnect() {
   setStatus('연결 중...');
   const body = {
     brand:       document.getElementById('brand').value,
     model_name:  document.getElementById('model').value,
-    meter_port:  document.getElementById('meter-port').value,
+    meter_port:  _getPort('meter-port', 'meter-port-manual'),
     meter_model: document.getElementById('meter-model').value,
-    gen_port:    document.getElementById('gen-port').value,
+    gen_port:    _getPort('gen-port', 'gen-port-manual'),
     gen_model:   document.getElementById('gen-model').value,
   };
   try {
@@ -314,23 +530,28 @@ async function doConnect() {
   } catch(e) { log('네트워크 오류: ' + e); }
 }
 
-async function doConnectMock() {
+async function doMockConnect() {
   setStatus('Mock 연결 중...');
-  const body = {
-    brand:      document.getElementById('brand').value || 'Samsung',
-    model_name: document.getElementById('model').value || 'QN65S95D',
-  };
   try {
-    const r = await fetch('/api/connect/mock', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const r = await fetch('/api/mock_connect', { method:'POST', headers:{'Content-Type':'application/json'} });
     const d = await r.json();
     if (d.ok) {
-      log('Mock 연결 성공');
-      document.getElementById('mock-result').innerHTML = '<span style="color:var(--yellow)">🔧 Mock 연결됨 — 시뮬레이션 모드</span>';
+      log('Mock 연결 성공 (가상 장비)');
+      document.getElementById('connect-result').innerHTML = '<span style="color:var(--yellow)">🧪 Mock 연결됨 (가상 장비)</span>';
     } else {
-      document.getElementById('mock-result').innerHTML = '<span style="color:var(--red)">✘ Mock 연결 실패</span>';
+      log('Mock 연결 실패: ' + d.error);
     }
     await checkStatus();
   } catch(e) { log('Mock 연결 오류: ' + e); }
+}
+
+async function doDisconnect() {
+  try {
+    await fetch('/api/disconnect', { method:'POST' });
+    log('장비 연결 해제');
+    document.getElementById('connect-result').innerHTML = '<span style="color:var(--muted)">연결 해제됨</span>';
+    await checkStatus();
+  } catch(e) { log('연결 해제 오류: ' + e); }
 }
 
 async function checkStatus() {
@@ -347,7 +568,9 @@ async function checkStatus() {
   } catch(e) {}
 }
 
-// ── SSE 연결 ──────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// SSE 연결
+// ════════════════════════════════════════════════════════════════════════
 function connectSSE(onData, onDone) {
   if (_sseSource) { _sseSource.close(); }
   _sseSource = new EventSource('/api/progress');
@@ -361,7 +584,9 @@ function connectSSE(onData, onDone) {
   _sseSource.onerror = () => { log('SSE 연결 끊김'); };
 }
 
-// ── 시퀀스 실행 공통 ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// 시퀀스 실행 공통
+// ════════════════════════════════════════════════════════════════════════
 async function runSeq(name, params) {
   const r = await fetch('/api/run/' + name, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(params) });
   const d = await r.json();
@@ -376,104 +601,186 @@ async function stopSeq() {
   log('중지 요청 — 현재 샘플 완료 후 정지');
 }
 
-// ── 엑셀 내보내기 ─────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// 엑셀 내보내기
+// ════════════════════════════════════════════════════════════════════════
 function exportResult(type) {
   const useAvg = _useAvg ? 'true' : 'false';
   window.location.href = `/api/export/${type}?use_avg=${useAvg}`;
 }
 
-// ── 센터 맞추기 ───────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// 센터 맞추기
+// ════════════════════════════════════════════════════════════════════════
 async function confirmCenter() {
   document.getElementById('center-status').textContent = '✔ 센터 확인 완료. 다음 단계로 진행하세요.';
   document.getElementById('center-ok').disabled = true;
   log('센터 확인 완료');
 }
 
-// ── 휘도 스윙 ─────────────────────────────────────────────────────
-let _swingRows = [];
+// ════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════
+// 휘도 스윙  — SDR/HDR 분리, Vivid/Standard/Cinema 실시간 누적
+// ════════════════════════════════════════════════════════════════════════
+const _SWING_DATA   = {};   // { "SDR_Vivid": [{Lv,x,...},...], ... }
+const _SWING_COLORS = { Vivid: '#e74c3c', Standard: '#4f8ef7', Cinema: '#27ae60' };
+const _SWING_CASES  = ['Vivid', 'Standard', 'Cinema'];
+let _swingCurrentKey = '';
 
 function setSwingHdr(v) {
   _swingHdr = v;
-  document.getElementById('swing-hdr-on').className = 'switch-btn' + (v ? ' on' : '');
+  document.getElementById('swing-hdr-on').className  = 'switch-btn' + (v ? ' on' : '');
   document.getElementById('swing-hdr-off').className = 'switch-btn' + (!v ? ' on' : '');
   applyHdr(v);
 }
 
+function clearSwing() {
+  Object.keys(_SWING_DATA).forEach(k => delete _SWING_DATA[k]);
+  _swingCurrentKey = '';
+  document.getElementById('swing-prog').style.width = '0%';
+  document.getElementById('swing-status').textContent = '초기화됨';
+  document.getElementById('swing-table-wrap').innerHTML =
+    '<span style="color:var(--muted);font-size:12px;">측정 시작 후 값이 쌓입니다.</span>';
+  drawSwingChartBoth();
+}
+
+function renderSwingTable() {
+  const wrap = document.getElementById('swing-table-wrap');
+  const keys = Object.keys(_SWING_DATA).filter(k => _SWING_DATA[k] && _SWING_DATA[k].length > 0);
+  if (!keys.length) return;
+
+  const maxN = Math.max(...keys.map(k => _SWING_DATA[k].length));
+  let html = `<table id="swing-tbl" style="font-size:12px;">
+    <tr><th>#</th>${keys.map(k => `<th>${k}<br><span style="font-weight:400;color:var(--muted)">Lv (cd/m²)</span></th>`).join('')}</tr>`;
+  for (let i = 0; i < maxN; i++) {
+    html += `<tr><td>${i + 1}</td>${keys.map(k => {
+      const d = _SWING_DATA[k];
+      return `<td>${d && d[i] !== undefined ? d[i].Lv.toFixed(3) : '—'}</td>`;
+    }).join('')}</tr>`;
+  }
+  html += '</table>';
+  wrap.innerHTML = html;
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
 function startSwing() {
-  _swingRows = [];
-  _chartData = [];
-  renderSwingTable();
   const caseVal = document.getElementById('swing-case').value;
+  const mode    = _swingHdr ? 'HDR' : 'SDR';
+  _swingCurrentKey  = `${mode}_${caseVal}`;
+  _SWING_DATA[_swingCurrentKey] = [];   // 이 케이스만 초기화, 나머지 유지
+  document.getElementById('swing-prog').style.width = '0%';
+  document.getElementById('swing-status').textContent = `${mode} ${caseVal} 측정 중...`;
+
   connectSSE(
     (d) => {
-      if (d.progress !== undefined) document.getElementById('swing-prog').style.width = (d.progress * 100) + '%';
-      if (d.data && d.data.Lv !== undefined) {
-        _swingRows.push(d.data);
-        _chartData.push({ t: _swingRows.length, Lv: d.data.Lv });
+      if (d.progress !== undefined)
+        document.getElementById('swing-prog').style.width =
+          Math.min(100, d.progress * 100).toFixed(1) + '%';
+
+      if (d.step === 'lum_swing' && d.data && d.data.Lv !== undefined) {
+        const key = _swingCurrentKey;
+        if (!_SWING_DATA[key]) _SWING_DATA[key] = [];
+        _SWING_DATA[key].push(d.data);
+        const n = _SWING_DATA[key].length;
+
+        document.getElementById('swing-status').textContent =
+          `${key} #${n}  Lv=${d.data.Lv?.toFixed(3)} cd/m²`;
+
         renderSwingTable();
-        drawChart();
-        log(`[Swing] Lv=${d.data.Lv?.toFixed(2)} x=${d.data.x?.toFixed(4)} y=${d.data.y?.toFixed(4)}`);
+
+        const isHdr = key.startsWith('HDR');
+        drawSwingChart(isHdr ? 'swing-chart-hdr' : 'swing-chart-sdr',
+                       isHdr ? 'HDR' : 'SDR');
+        log(`[Swing ${key}] #${n} Lv=${d.data.Lv?.toFixed(3)}`);
       }
     },
-    (done) => {
+    (d) => {
       document.getElementById('swing-prog').style.width = '100%';
-      log('휘도 스윙 완료 — ' + _swingRows.length + '건');
+      const n = (_SWING_DATA[_swingCurrentKey] || []).length;
+      document.getElementById('swing-status').textContent =
+        `${_swingCurrentKey} 완료 — ${n}건`;
+      log(`휘도 스윙 완료 — ${n}건`);
+      if (d && d.auto_save_path) _showAutoSavePath(d.auto_save_path);
     }
   );
   runSeq('lum_swing', { case: caseVal, is_hdr: _swingHdr });
 }
 
-function renderSwingTable() {
-  const rows = _swingRows.slice(-20);
-  if (!rows.length) { document.getElementById('swing-table-wrap').innerHTML = '<span style="color:var(--muted)">측정 대기 중</span>'; return; }
-  let h = '<table><tr><th>#</th><th>Lv (cd/m²)</th><th>x</th><th>y</th><th>u\'</th><th>v\'</th></tr>';
-  rows.forEach((r, i) => {
-    h += `<tr><td>${_swingRows.length - rows.length + i + 1}</td><td>${r.Lv?.toFixed(3)??'-'}</td><td>${r.x?.toFixed(4)??'-'}</td><td>${r.y?.toFixed(4)??'-'}</td><td>${r.u_prime?.toFixed(4)??'-'}</td><td>${r.v_prime?.toFixed(4)??'-'}</td></tr>`;
-  });
-  h += '</table>';
-  document.getElementById('swing-table-wrap').innerHTML = h;
-}
-
-// ── 간이 라인 차트 (Canvas) ───────────────────────────────────────
-function drawChart() {
-  const canvas = document.getElementById('lum-chart');
+// ── 차트 그리기 ────────────────────────────────────────────────────────
+function drawSwingChart(canvasId, mode) {
+  const canvas = document.getElementById(canvasId);
   if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.offsetWidth; const H = canvas.offsetHeight;
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  if (W < 10 || H < 10) return;   // 패널 숨김 상태 스킵
   canvas.width = W; canvas.height = H;
-  ctx.clearRect(0, 0, W, H);
+  const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#090b12';
   ctx.fillRect(0, 0, W, H);
-  if (_chartData.length < 2) return;
-  const Lvs = _chartData.map(p => p.Lv);
-  const minLv = Math.min(...Lvs); const maxLv = Math.max(...Lvs);
-  const pad = { l: 50, r: 16, t: 12, b: 28 };
-  const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
-  const scX = (i) => pad.l + (i / (_chartData.length - 1)) * innerW;
-  const scY = (v) => pad.t + innerH - ((v - minLv) / (maxLv - minLv || 1)) * innerH;
-  // grid
+
+  const pad = { l: 50, r: 12, t: 10, b: 24 };
+  const iW  = W - pad.l - pad.r, iH = H - pad.t - pad.b;
+
+  // 이 모드의 전체 데이터 범위 계산
+  let maxN = 0, maxLv = 0, minLv = Infinity;
+  _SWING_CASES.forEach(c => {
+    const rows = _SWING_DATA[`${mode}_${c}`] || [];
+    if (rows.length > maxN) maxN = rows.length;
+    rows.forEach(r => { if (r.Lv > maxLv) maxLv = r.Lv; if (r.Lv < minLv) minLv = r.Lv; });
+  });
+
+  if (maxN === 0) {
+    ctx.fillStyle = '#444'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('측정 데이터 없음', W / 2, H / 2);
+    return;
+  }
+  if (minLv === Infinity) minLv = 0;
+  const lvRange = (maxLv - minLv) || 1;
+  const scX = (i)   => pad.l + (i / Math.max(maxN - 1, 1)) * iW;
+  const scY = (lv)  => pad.t + iH - ((lv - minLv) / lvRange) * iH;
+
+  // 그리드
   ctx.strokeStyle = '#1e2130'; ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
-    const y = pad.t + (i / 4) * innerH;
+    const y = pad.t + (i / 4) * iH;
     ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
-    const lv = maxLv - (i / 4) * (maxLv - minLv);
-    ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.textAlign = 'right';
-    ctx.fillText(lv.toFixed(1), pad.l - 4, y + 4);
+    ctx.fillStyle = '#666'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillText((maxLv - (i / 4) * lvRange).toFixed(0), pad.l - 3, y + 3);
   }
-  // line
-  ctx.strokeStyle = '#4f8ef7'; ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  _chartData.forEach((p, i) => {
-    i === 0 ? ctx.moveTo(scX(i), scY(p.Lv)) : ctx.lineTo(scX(i), scY(p.Lv));
+  ctx.fillStyle = '#666'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+  ctx.fillText(`${maxN}회`, pad.l + iW, H - 4);
+
+  // 케이스별 라인
+  _SWING_CASES.forEach(c => {
+    const rows = _SWING_DATA[`${mode}_${c}`] || [];
+    if (rows.length === 0) return;
+    ctx.strokeStyle = _SWING_COLORS[c]; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    rows.forEach((r, i) => {
+      i === 0 ? ctx.moveTo(scX(i), scY(r.Lv)) : ctx.lineTo(scX(i), scY(r.Lv));
+    });
+    ctx.stroke();
+    // 최신 포인트 강조
+    const last = rows[rows.length - 1];
+    ctx.fillStyle = _SWING_COLORS[c];
+    ctx.beginPath();
+    ctx.arc(scX(rows.length - 1), scY(last.Lv), 3, 0, Math.PI * 2);
+    ctx.fill();
   });
-  ctx.stroke();
-  // x label
-  ctx.fillStyle = '#555'; ctx.textAlign = 'center';
-  ctx.fillText(`${_chartData.length}회`, W - pad.r, H - 6);
 }
 
-// ── APL 로딩 ──────────────────────────────────────────────────────
-let _loadRows = [];
+function drawSwingChartBoth() {
+  drawSwingChart('swing-chart-sdr', 'SDR');
+  drawSwingChart('swing-chart-hdr', 'HDR');
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// APL 로딩
+// ════════════════════════════════════════════════════════════════════════
+// 누적 테이블 행 목록 (재측정 시 해당 케이스만 덮어씌움)
+// key: "SDR_Vivid" → [{apl, Lv, x, y, u_prime, v_prime}]
+let _loadAllRows = {};
+let _loadCurrentCase = 'Vivid';
+let _loadCurrentHdr = false;
 
 function setLoadHdr(v) {
   _loadHdr = v;
@@ -485,6 +792,8 @@ function setCooling(v) {
   _cooling = v;
   document.getElementById('cool-on').className = 'switch-btn' + (v ? ' on' : '');
   document.getElementById('cool-off').className = 'switch-btn' + (!v ? ' on' : '');
+  document.getElementById('cool-apl-group').style.display = v ? '' : 'none';
+  document.getElementById('cool-sec-group').style.display = v ? '' : 'none';
 }
 function setUseAvg(v) {
   _useAvg = v;
@@ -493,116 +802,577 @@ function setUseAvg(v) {
 }
 
 function startLoading() {
-  _loadRows = [];
-  document.getElementById('load-table-wrap').innerHTML = '';
   const version = parseInt(document.getElementById('load-version').value);
   const caseVal = document.getElementById('load-case').value;
+  _loadCurrentCase = caseVal;
+  _loadCurrentHdr = _loadHdr;
+  const chartKey = _loadHdr ? 'hdr' : 'sdr';
+  const rowKey = `${_loadHdr ? 'HDR' : 'SDR'}_${caseVal}`;
+
+  // 이 케이스만 초기화, 다른 케이스 유지
+  _aplChartData[chartKey][caseVal] = [];
+  _loadAllRows[rowKey] = [];
+
+  // 테이블이 없으면 헤더 생성 (최초 1회)
+  const wrap = document.getElementById('load-table-wrap');
+  if (!wrap.querySelector('table')) {
+    wrap.innerHTML = `<table id="load-tbl">
+      <tr><th>케이스</th><th>APL%</th><th>Lv (cd/m²)</th><th>x</th><th>y</th><th>u'</th><th>v'</th></tr>
+    </table>`;
+  } else {
+    // 기존 테이블에서 이 케이스 행만 제거
+    const tbl = document.getElementById('load-tbl');
+    if (tbl) {
+      Array.from(tbl.querySelectorAll('tr[data-key]')).forEach(tr => {
+        if (tr.dataset.key === rowKey) tr.remove();
+      });
+    }
+  }
+
+  document.getElementById('load-prog').style.width = '0%';
+  document.getElementById('load-status').textContent = `${rowKey} 측정 중...`;
+
   connectSSE(
     (d) => {
+      if (d.step !== 'lum_loading') return;
       if (d.progress !== undefined) {
         document.getElementById('load-prog').style.width = (d.progress * 100).toFixed(0) + '%';
-        document.getElementById('load-status').textContent = `진행 중 ${(d.progress * 100).toFixed(0)}% — ${d.step}`;
       }
       if (d.data && typeof d.data === 'object' && d.data.apl !== undefined) {
         const apl = d.data.apl;
         const results = d.data.results || [];
         const avgLv = results.length ? results.reduce((s, r) => s + r.Lv, 0) / results.length : 0;
         const rep = results[0] || {};
-        _loadRows.push({ apl, Lv: avgLv, x: rep.x, y: rep.y, u_prime: rep.u_prime, v_prime: rep.v_prime });
-        renderLoadTable();
+        const rowData = { apl, Lv: avgLv, x: rep.x, y: rep.y, u_prime: rep.u_prime, v_prime: rep.v_prime };
+        _loadAllRows[rowKey].push(rowData);
+
+        // 테이블 행 실시간 추가
+        const tbl = document.getElementById('load-tbl');
+        if (tbl) {
+          const tr = document.createElement('tr');
+          tr.dataset.key = rowKey;
+          tr.innerHTML = `<td>${rowKey}</td><td>${apl}%</td><td>${avgLv.toFixed(3)}</td>
+            <td>${rep.x?.toFixed(4)??'-'}</td><td>${rep.y?.toFixed(4)??'-'}</td>
+            <td>${rep.u_prime?.toFixed(4)??'-'}</td><td>${rep.v_prime?.toFixed(4)??'-'}</td>`;
+          tbl.appendChild(tr);
+          wrap.scrollTop = wrap.scrollHeight;
+        }
+
+        // 차트 데이터 추가 및 갱신
+        _aplChartData[chartKey][caseVal].push({ apl, Lv: avgLv });
+        drawAplChart('sdr');
+        drawAplChart('hdr');
+
+        const pct = (d.progress * 100).toFixed(0);
+        document.getElementById('load-status').textContent =
+          `${rowKey} APL ${apl}% — Lv=${avgLv.toFixed(3)} cd/m²  (${pct}%)`;
         log(`[APL ${apl}%] Lv=${avgLv.toFixed(3)} (avg ${results.length}회)`);
       }
     },
-    () => {
+    (d) => {
       document.getElementById('load-prog').style.width = '100%';
-      document.getElementById('load-status').textContent = `완료 — ${_loadRows.length}개 APL 측정`;
+      const n = (_loadAllRows[rowKey] || []).length;
+      document.getElementById('load-status').textContent = `완료 — ${n}개 APL 측정`;
       log('APL 로딩 완료');
+      if (d && d.auto_save_path) _showAutoSavePath(d.auto_save_path);
     }
   );
-  runSeq('lum_loading', { version, case: caseVal, is_hdr: _loadHdr, use_avg: _useAvg, cooling_enabled: _cooling });
-}
-
-function renderLoadTable() {
-  if (!_loadRows.length) return;
-  let h = '<table><tr><th>APL%</th><th>Lv (cd/m²)</th><th>x</th><th>y</th><th>u\'</th><th>v\'</th></tr>';
-  _loadRows.forEach(r => {
-    h += `<tr><td>${r.apl??'-'}%</td><td>${r.Lv?.toFixed(3)??'-'}</td><td>${r.x?.toFixed(4)??'-'}</td><td>${r.y?.toFixed(4)??'-'}</td><td>${r.u_prime?.toFixed(4)??'-'}</td><td>${r.v_prime?.toFixed(4)??'-'}</td></tr>`;
+  const measCount = parseInt(document.getElementById('load-meas-count').value) || 1;
+  const coolApl = parseInt(document.getElementById('load-cool-apl').value) || 10;
+  const coolSec = parseFloat(document.getElementById('load-cool-sec').value) || 5;
+  runSeq('lum_loading', {
+    version, case: caseVal, is_hdr: _loadHdr, use_avg: _useAvg,
+    cooling_enabled: _cooling,
+    measurements_per_step: measCount,
+    cooling_apl_threshold: coolApl,
+    cooling_duration_sec: coolSec,
   });
-  h += '</table>';
-  document.getElementById('load-table-wrap').innerHTML = h;
 }
 
-// ── 색재현율 ──────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// APL 차트 (Canvas) — SDR 또는 HDR
+// ════════════════════════════════════════════════════════════════════════
+const _APL_CASE_COLORS = { Vivid: '#e74c3c', Standard: '#4f8ef7', Cinema: '#27ae60' };
+
+function drawAplChart(mode) { // mode: 'sdr' | 'hdr'
+  const canvasId = mode === 'sdr' ? 'apl-chart-sdr' : 'apl-chart-hdr';
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 300; const H = canvas.offsetHeight || 220;
+  canvas.width = W; canvas.height = H;
+  ctx.fillStyle = '#090b12'; ctx.fillRect(0, 0, W, H);
+
+  const seriesMap = _aplChartData[mode];
+  const allPoints = Object.values(seriesMap).flat();
+  if (!allPoints.length) {
+    ctx.fillStyle = '#555'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('데이터 없음', W/2, H/2);
+    return;
+  }
+
+  const pad = { l: 55, r: 16, t: 12, b: 28 };
+  const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
+  const allLvs = allPoints.map(p => p.Lv);
+  const minLv = 0, maxLv = Math.max(...allLvs) * 1.1 || 1;
+  const scX = (apl) => pad.l + (apl / 100) * innerW;
+  const scY = (lv) => pad.t + innerH - (lv / maxLv) * innerH;
+
+  // Grid
+  ctx.strokeStyle = '#1e2130'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + (i / 4) * innerH;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    const lv = maxLv - (i / 4) * maxLv;
+    ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.textAlign = 'right';
+    ctx.fillText(lv.toFixed(0), pad.l - 4, y + 4);
+  }
+  // X axis labels
+  [0, 25, 50, 75, 100].forEach(apl => {
+    const x = scX(apl);
+    ctx.fillStyle = '#555'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(apl + '%', x, H - 6);
+  });
+
+  // Lines per case
+  Object.entries(seriesMap).forEach(([caseLabel, pts]) => {
+    if (!pts.length) return;
+    const color = _APL_CASE_COLORS[caseLabel] || '#fff';
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const x = scX(p.apl), y = scY(p.Lv);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // dots
+    pts.forEach(p => {
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(scX(p.apl), scY(p.Lv), 2.5, 0, Math.PI*2); ctx.fill();
+    });
+    // legend
+  });
+
+  // Legend
+  let lx = pad.l + 4;
+  Object.entries(_APL_CASE_COLORS).forEach(([label, color]) => {
+    if (seriesMap[label] && seriesMap[label].length) {
+      ctx.fillStyle = color; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillRect(lx, pad.t + 2, 12, 3);
+      ctx.fillText(label, lx + 15, pad.t + 9);
+      lx += 70;
+    }
+  });
+  // Mode label
+  ctx.fillStyle = '#4a4e6a'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText(mode.toUpperCase(), W - pad.r, pad.t + 10);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 색재현율
+// ════════════════════════════════════════════════════════════════════════
 let _gamutRows = [];
+// RGB 측정 결과 저장 (gamut overlap 계산용)
+let _gamutRgb = { red: null, green: null, blue: null };
+
+function setGamutHdr(v) {
+  _gamutHdr = v;
+  document.getElementById('gamut-hdr-on').className = 'switch-btn' + (v ? ' on' : '');
+  document.getElementById('gamut-hdr-off').className = 'switch-btn' + (!v ? ' on' : '');
+  applyHdr(v);
+}
 
 function startGamut() {
   _gamutRows = [];
+  _uvPoints = [];
+  _gamutRgb = { red: null, green: null, blue: null };
+  document.getElementById('gamut-table-wrap').innerHTML = '';
+  document.getElementById('gamut-dci-label').textContent = 'DCI-P3: —';
+  document.getElementById('gamut-bt2020-label').textContent = 'BT.2020: —';
+  document.getElementById('gamut-status').textContent = '측정 중...';
+
   connectSSE(
     (d) => {
-      if (d.progress !== undefined) document.getElementById('gamut-prog').style.width = (d.progress * 100) + '%';
-      if (d.data && d.data.result !== undefined) {
+      if (d.step !== 'gamut') return;
+      if (d.progress !== undefined)
+        document.getElementById('gamut-prog').style.width = (d.progress * 100).toFixed(0) + '%';
+      if (d.data && 'color' in d.data) {
+        const color = d.data.color;
+        if (color === null) {
+          document.getElementById('gamut-status').textContent = '초기화 중...';
+          return;
+        }
         const r = d.data.result;
-        _gamutRows.push({ step: d.data.color, ...r });
+        if (!r) return;
+        _gamutRows.push({ step: color, ...r });
+        // white/black 포인트는 차트에 표시하지 않음
+        if (color !== 'white' && color !== 'black') {
+          _uvPoints.push({ label: color, u: r.u_prime, v: r.v_prime });
+          if (color in _gamutRgb) _gamutRgb[color] = r;
+        }
         renderGamutTable();
-        log(`[Gamut ${d.data.color}] Lv=${r.Lv?.toFixed(3)} x=${r.x?.toFixed(4)} y=${r.y?.toFixed(4)}`);
+        drawUvChart();
+        document.getElementById('gamut-status').textContent =
+          `${color} 측정 완료 — ${(d.progress * 100).toFixed(0)}%`;
+        log(`[Gamut ${color}] Lv=${r.Lv?.toFixed(3)} x=${r.x?.toFixed(4)} y=${r.y?.toFixed(4)}`);
       }
     },
-    () => { document.getElementById('gamut-prog').style.width = '100%'; log('색재현율 측정 완료'); }
+    (d) => {
+      document.getElementById('gamut-prog').style.width = '100%';
+      document.getElementById('gamut-status').textContent = '완료';
+      drawUvChart();
+      _calcGamutOverlap();
+      log('색재현율 측정 완료');
+      if (d && d.auto_save_path) _showAutoSavePath(d.auto_save_path);
+    }
   );
-  runSeq('gamut', {});
+  runSeq('gamut', { is_hdr: _gamutHdr });
+}
+
+// ── Gamut overlap 계산 (삼각형 면적 교집합 / 기준 삼각형 면적) ─────────────
+function _polyArea(pts) {
+  // Shoelace formula
+  let area = 0;
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += pts[i][0] * pts[j][1];
+    area -= pts[j][0] * pts[i][1];
+  }
+  return Math.abs(area) / 2;
+}
+
+function _polyIntersect(subj, clip) {
+  // Sutherland-Hodgman algorithm
+  function _inside(p, a, b) {
+    return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0;
+  }
+  function _intersect(a, b, c, d) {
+    const A1 = b[1] - a[1], B1 = a[0] - b[0], C1 = A1 * a[0] + B1 * a[1];
+    const A2 = d[1] - c[1], B2 = c[0] - d[0], C2 = A2 * c[0] + B2 * c[1];
+    const det = A1 * B2 - A2 * B1;
+    if (Math.abs(det) < 1e-10) return a;
+    return [(B2 * C1 - B1 * C2) / det, (A1 * C2 - A2 * C1) / det];
+  }
+  let output = subj.slice();
+  for (let i = 0; i < clip.length; i++) {
+    const input = output;
+    output = [];
+    const a = clip[i], b = clip[(i + 1) % clip.length];
+    for (let j = 0; j < input.length; j++) {
+      const cur = input[j], prev = input[(j + input.length - 1) % input.length];
+      if (_inside(cur, a, b)) {
+        if (!_inside(prev, a, b)) output.push(_intersect(prev, cur, a, b));
+        output.push(cur);
+      } else if (_inside(prev, a, b)) {
+        output.push(_intersect(prev, cur, a, b));
+      }
+    }
+  }
+  return output;
+}
+
+function _calcGamutOverlap() {
+  const rr = _gamutRgb.red, rg = _gamutRgb.green, rb = _gamutRgb.blue;
+  if (!rr || !rg || !rb) return;
+  const meas = [
+    [rr.u_prime, rr.v_prime],
+    [rg.u_prime, rg.v_prime],
+    [rb.u_prime, rb.v_prime],
+  ];
+  const dci  = _DCI_P3_UV.slice(0, 3);
+  const bt   = _BT2020_UV.slice(0, 3);
+
+  const measArea = _polyArea(meas);
+  if (measArea < 1e-10) return;
+
+  const dciInter = _polyIntersect(meas, dci);
+  const btInter  = _polyIntersect(meas, bt);
+  const dciPct   = dciInter.length >= 3 ? (_polyArea(dciInter) / _polyArea(dci) * 100) : 0;
+  const btPct    = btInter.length  >= 3 ? (_polyArea(btInter)  / _polyArea(bt)  * 100) : 0;
+
+  document.getElementById('gamut-dci-label').textContent = `DCI-P3: ${dciPct.toFixed(1)}%`;
+  document.getElementById('gamut-bt2020-label').textContent = `BT.2020: ${btPct.toFixed(1)}%`;
 }
 
 function renderGamutTable() {
   if (!_gamutRows.length) return;
-  const cols = ['step','Lv','x','y','u_prime','v_prime','X','Y','Z'];
-  let h = '<table><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr>';
+  const cols = [
+    { key: 'step', label: '컬러' },
+    { key: 'Lv', label: 'Lv (cd/m²)', fmt: v => v?.toFixed(3) },
+    { key: 'x', label: 'x', fmt: v => v?.toFixed(4) },
+    { key: 'y', label: 'y', fmt: v => v?.toFixed(4) },
+    { key: 'u_prime', label: "u'", fmt: v => v?.toFixed(4) },
+    { key: 'v_prime', label: "v'", fmt: v => v?.toFixed(4) },
+    { key: 'X', label: 'X', fmt: v => v?.toFixed(4) },
+    { key: 'Y', label: 'Y', fmt: v => v?.toFixed(4) },
+    { key: 'Z', label: 'Z', fmt: v => v?.toFixed(4) },
+    { key: 'cct', label: 'CCT (K)', fmt: v => v?.toFixed(0) },
+    { key: 'duv', label: 'Duv', fmt: v => v?.toFixed(5) },
+  ];
+  let h = '<table><tr>' + cols.map(c => `<th>${c.label}</th>`).join('') + '</tr>';
   _gamutRows.forEach(r => {
     h += '<tr>' + cols.map(c => {
-      const v = r[c];
-      return `<td>${typeof v === 'number' ? v.toFixed(4) : (v??'-')}</td>`;
+      const v = r[c.key];
+      return `<td>${c.fmt ? (c.fmt(v) ?? '-') : (v ?? '-')}</td>`;
     }).join('') + '</tr>';
   });
   h += '</table>';
   document.getElementById('gamut-table-wrap').innerHTML = h;
 }
 
-// ── 명암비 ────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// u'v' 차트 (Canvas) — DCI-P3 / BT.2020 기준 삼각형 + 측정점
+// ════════════════════════════════════════════════════════════════════════
+// u'v' 표준 기준점
+const _DCI_P3_UV = [[0.209, 0.488], [0.139, 0.050], [0.460, 0.146], [0.209, 0.488]];
+const _BT2020_UV = [[0.197, 0.468], [0.092, 0.018], [0.508, 0.156], [0.197, 0.468]];
+// 측정점 색상
+const _UV_POINT_COLORS = {
+  red: '#f75f5f', green: '#3dd68c', blue: '#6699ff',
+  white: '#ffffff', black: '#888888',
+};
+
+function drawUvChart() {
+  const canvas = document.getElementById('uv-chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 400; const H = canvas.offsetHeight || 300;
+  canvas.width = W; canvas.height = H;
+  ctx.fillStyle = '#090b12'; ctx.fillRect(0, 0, W, H);
+
+  // Mapping: u' and v' range [0, 0.65] -> canvas
+  const pad = { l: 40, r: 16, t: 12, b: 36 };
+  const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
+  const UV_MAX = 0.65;
+  const scU = (u) => pad.l + (u / UV_MAX) * innerW;
+  const scV = (v) => pad.t + innerH - (v / UV_MAX) * innerH;
+
+  // Grid
+  ctx.strokeStyle = '#1e2130'; ctx.lineWidth = 1;
+  [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6].forEach(v => {
+    const y = scV(v);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillStyle = '#444'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillText(v.toFixed(1), pad.l - 3, y + 3);
+  });
+  [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6].forEach(u => {
+    const x = scU(u);
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b); ctx.stroke();
+    ctx.fillStyle = '#444'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(u.toFixed(1), x, H - pad.b + 14);
+  });
+
+  // Axis labels
+  ctx.fillStyle = '#666'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText("u'", W / 2, H - 2);
+  ctx.save(); ctx.translate(12, H / 2); ctx.rotate(-Math.PI/2);
+  ctx.fillText("v'", 0, 0); ctx.restore();
+
+  // BT.2020 triangle (gray dashed)
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = '#7a7e99'; ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  _BT2020_UV.forEach(([u, v], i) => i === 0 ? ctx.moveTo(scU(u), scV(v)) : ctx.lineTo(scU(u), scV(v)));
+  ctx.stroke();
+
+  // DCI-P3 triangle (blue dashed)
+  ctx.strokeStyle = '#4f8ef7'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  _DCI_P3_UV.forEach(([u, v], i) => i === 0 ? ctx.moveTo(scU(u), scV(v)) : ctx.lineTo(scU(u), scV(v)));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 측정 R/G/B 삼각형 (3개 모두 있을 때)
+  const rPt = _uvPoints.find(p => p.label === 'red');
+  const gPt = _uvPoints.find(p => p.label === 'green');
+  const bPt = _uvPoints.find(p => p.label === 'blue');
+  if (rPt && gPt && bPt) {
+    ctx.setLineDash([]);
+    ctx.strokeStyle = '#f7c94f'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(scU(rPt.u), scV(rPt.v));
+    ctx.lineTo(scU(gPt.u), scV(gPt.v));
+    ctx.lineTo(scU(bPt.u), scV(bPt.v));
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // Measurement points (white/black 제외)
+  _uvPoints.forEach(pt => {
+    if (pt.u == null || pt.v == null) return;
+    const color = _UV_POINT_COLORS[pt.label?.toLowerCase()] || '#ffff00';
+    const x = scU(pt.u), y = scV(pt.v);
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = color; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(pt.label?.charAt(0)?.toUpperCase() ?? '?', x + 7, y + 4);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 명암비
+// ════════════════════════════════════════════════════════════════════════
 let _contrastRows = [];
+let _contrastLv0 = null;  // Full White Lv
+
+function setContrastHdr(v) {
+  _contrastHdr = v;
+  document.getElementById('contrast-hdr-on').className = 'switch-btn' + (v ? ' on' : '');
+  document.getElementById('contrast-hdr-off').className = 'switch-btn' + (!v ? ' on' : '');
+  applyHdr(v);
+}
 
 function startContrast() {
   _contrastRows = [];
+  _contrastLv0 = null;
+  document.getElementById('contrast-table-wrap').innerHTML = '';
+  document.getElementById('contrast-status').textContent = '측정 중...';
+
+  // 테이블 헤더 생성
+  document.getElementById('contrast-table-wrap').innerHTML =
+    `<table id="contrast-tbl">
+      <tr><th>패턴</th><th>Lv (cd/m²)</th><th>x</th><th>y</th><th>CR (White/Lv)</th></tr>
+    </table>`;
+
   connectSSE(
     (d) => {
-      if (d.progress !== undefined) document.getElementById('contrast-prog').style.width = (d.progress * 100) + '%';
-      if (d.data && d.data.result !== undefined) {
+      if (d.step !== 'contrast') return;
+      if (d.progress !== undefined)
+        document.getElementById('contrast-prog').style.width = (d.progress * 100).toFixed(0) + '%';
+      if (d.data && 'win_size' in d.data) {
         const r = d.data.result;
         const win = d.data.win_size;
+        if (!r) return;
+        // win_size == 0.0 → Full White 기준값 저장
+        if (win === 0 || win === 0.0) _contrastLv0 = r.Lv;
         _contrastRows.push({ win_size: win, ...r });
-        renderContrastTable();
-        log(`[CR ${win}%] Lv=${r.Lv?.toFixed(4)}`);
+
+        const isWhite = (win === 0 || win === 0.0);
+        // 데스크탑과 동일: Full White → 패턴="Full White", CR="—"
+        //                  Black window → 패턴="N×N%", CR="xxxx:1"
+        const patternLabel = isWhite ? 'Full White' : `${win.toFixed(1)} × ${win.toFixed(1)}%`;
+        const cr = (!isWhite && _contrastLv0 && _contrastLv0 > 0 && r.Lv > 0)
+          ? `${(_contrastLv0 / r.Lv).toFixed(0)} : 1` : '—';
+
+        const tbl = document.getElementById('contrast-tbl');
+        if (tbl) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${patternLabel}</td><td>${r.Lv?.toFixed(4)??'-'}</td>
+            <td>${r.x?.toFixed(4)??'-'}</td><td>${r.y?.toFixed(4)??'-'}</td>
+            <td>${cr}</td>`;
+          tbl.appendChild(tr);
+        }
+
+        const stepLabel = isWhite ? 'Full White' : `창 H/V ${win.toFixed(1)}%`;
+        document.getElementById('contrast-status').textContent =
+          `${stepLabel} 측정 — ${(d.progress * 100).toFixed(0)}%`;
+        log(`[CR win=${win}%] Lv=${r.Lv?.toFixed(4)}`);
       }
     },
-    () => { document.getElementById('contrast-prog').style.width = '100%'; log('명암비 측정 완료'); }
+    (d) => {
+      document.getElementById('contrast-prog').style.width = '100%';
+      document.getElementById('contrast-status').textContent = '완료';
+      log('명암비 측정 완료');
+      if (d && d.auto_save_path) _showAutoSavePath(d.auto_save_path);
+    }
   );
-  runSeq('contrast', {});
+  runSeq('contrast', { is_hdr: _contrastHdr });
 }
 
-function renderContrastTable() {
-  if (!_contrastRows.length) return;
-  let h = '<table><tr><th>패턴</th><th>Lv (cd/m²)</th><th>x</th><th>y</th></tr>';
-  _contrastRows.forEach(r => {
-    h += `<tr><td>${r.win_size??'-'}%</td><td>${r.Lv?.toFixed(4)??'-'}</td><td>${r.x?.toFixed(4)??'-'}</td><td>${r.y?.toFixed(4)??'-'}</td></tr>`;
-  });
-  h += '</table>';
-  document.getElementById('contrast-table-wrap').innerHTML = h;
+// ════════════════════════════════════════════════════════════════════════
+// 보고서 템플릿
+// ════════════════════════════════════════════════════════════════════════
+function loadReportTemplate() {
+  const fileInput = document.getElementById('report-file');
+  const reportType = document.getElementById('report-type').value;
+  const file = fileInput.files[0];
+  if (!file) {
+    document.getElementById('report-status').innerHTML = '<span style="color:var(--red)">파일을 선택해주세요.</span>';
+    return;
+  }
+  document.getElementById('report-status').textContent = `파일 로드 중: ${file.name} (${reportType})`;
+  // Show a simple preview table with file metadata
+  const card = document.getElementById('report-table-card');
+  const wrap = document.getElementById('report-table-wrap');
+  card.style.display = 'block';
+  const typeLabel = reportType === 'competitor' ? '경쟁사 비교 장표' : '광학 측정 데이터';
+  const sizeMb = (file.size / 1024 / 1024).toFixed(2);
+  wrap.innerHTML = `
+    <table>
+      <tr><th>항목</th><th>내용</th></tr>
+      <tr><td>파일명</td><td>${file.name}</td></tr>
+      <tr><td>크기</td><td>${sizeMb} MB</td></tr>
+      <tr><td>형식</td><td>${typeLabel}</td></tr>
+      <tr><td>최종 수정</td><td>${new Date(file.lastModified).toLocaleString('ko-KR')}</td></tr>
+      <tr><td>상태</td><td><span style="color:var(--green)">✔ 로드 완료 (xlsx 파싱은 서버 연동 필요)</span></td></tr>
+    </table>`;
+  log(`보고서 템플릿 로드: ${file.name} [${typeLabel}]`);
+  document.getElementById('report-status').innerHTML = `<span style="color:var(--green)">✔ 파일 로드 완료: ${file.name}</span>`;
 }
 
-// ── 초기화 ────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+// 자동 저장
+// ════════════════════════════════════════════════════════════════════════
+async function setAutoSaveDir() {
+  const path = document.getElementById('auto-save-dir').value.trim();
+  const statusEl = document.getElementById('auto-save-status');
+  try {
+    const r = await fetch('/api/auto_save_dir', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ path }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      statusEl.style.color = path ? 'var(--green)' : 'var(--muted)';
+      statusEl.textContent = path
+        ? `✔ 저장 폴더: ${path}`
+        : '자동 저장 비활성화 — 폴더를 지정하면 각 측정 완료 시 자동 저장됩니다.';
+      log(path ? `자동 저장 폴더 설정: ${path}` : '자동 저장 비활성화');
+    } else {
+      statusEl.style.color = 'var(--red)';
+      statusEl.textContent = `오류: ${d.error}`;
+    }
+  } catch(e) {
+    log('자동 저장 폴더 설정 오류: ' + e);
+  }
+}
+
+async function loadAutoSaveDir() {
+  try {
+    const r = await fetch('/api/auto_save_dir');
+    const d = await r.json();
+    if (d.ok && d.path) {
+      document.getElementById('auto-save-dir').value = d.path;
+      const statusEl = document.getElementById('auto-save-status');
+      statusEl.style.color = 'var(--green)';
+      statusEl.textContent = `✔ 저장 폴더: ${d.path}`;
+    }
+  } catch(e) {}
+}
+
+function _showAutoSavePath(path) {
+  if (!path) return;
+  const statusEl = document.getElementById('auto-save-status');
+  statusEl.style.color = 'var(--green)';
+  statusEl.textContent = `✔ 저장됨: ${path}`;
+  log(`자동 저장 완료: ${path}`);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 초기화
+// ════════════════════════════════════════════════════════════════════════
 checkStatus();
+scanPorts();
+loadAutoSaveDir();
+
 // 센터 확인 버튼: 패턴 출력 후 활성화
-const origRunSeq = runSeq;
+const _origRunSeq = runSeq;
 window.runSeq = async function(name, params) {
-  const ok = await origRunSeq(name, params);
+  const ok = await _origRunSeq(name, params);
   if (ok && name === 'center_align') {
     setTimeout(() => {
       document.getElementById('center-ok').disabled = false;

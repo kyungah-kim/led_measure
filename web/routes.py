@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import queue
 import threading
 from typing import Any, Generator
@@ -11,6 +12,44 @@ from flask import Blueprint, Response, current_app, jsonify, request, render_tem
 
 from core.engine import MeasurementEngine
 from core.export import ExcelExporter
+
+
+def _save_all_session(engine: MeasurementEngine) -> str:
+    """세션 데이터를 {brand}_{model}_all.xlsx 로 자동 저장. 경로 반환."""
+    if not engine.auto_save_dir:
+        return ""
+    brand = engine.brand or "brand"
+    model = engine.model_name or "model"
+    path = os.path.join(engine.auto_save_dir, f"{brand}_{model}_all.xlsx")
+    try:
+        ExcelExporter().export_all_session(
+            brand=brand, model=model,
+            session_swing=engine.session_swing,
+            session_loading=engine.session_loading,
+            session_gamut=engine.session_gamut,
+            session_contrast=engine.session_contrast,
+            file_path=path,
+        )
+    except Exception as e:
+        print(f"[auto_save] 오류: {e}")
+        return ""
+    return path
+
+
+def _update_session(engine: MeasurementEngine, seq_name: str,
+                    params: dict[str, Any], result: Any) -> None:
+    """시퀀스 완료 후 engine 세션 데이터를 갱신한다."""
+    mode = "HDR" if params.get("is_hdr") else "SDR"
+    case = params.get("case", "")
+    if seq_name == "lum_swing" and isinstance(result, dict):
+        for k, v in result.items():
+            engine.session_swing[f"{mode}_{k}"] = list(v)
+    elif seq_name == "lum_loading" and isinstance(result, dict):
+        engine.session_loading[f"{mode}_{case}"] = dict(result)
+    elif seq_name == "gamut" and isinstance(result, dict):
+        engine.session_gamut[mode] = dict(result)
+    elif seq_name == "contrast" and isinstance(result, dict):
+        engine.session_contrast[mode] = dict(result)
 
 
 def _to_json_safe(obj: Any) -> Any:
@@ -91,19 +130,43 @@ def connect() -> Response:
     return jsonify({"ok": True, "ready": engine.is_ready})
 
 
-@bp.route("/connect/mock", methods=["POST"])
-def connect_mock() -> Response:
-    """Connect Mock meter and generator for testing without physical hardware."""
-    from core.equipment.mock import MockMeter, MockGenerator
-    body = request.get_json(force=True) or {}
+# ---------------------------------------------------------------------------
+# Mock connect / Disconnect
+# ---------------------------------------------------------------------------
+
+@bp.route("/mock_connect", methods=["POST"])
+def mock_connect() -> Response:
+    """Connect mock meter and generator for offline testing."""
     engine = _get_engine()
-    engine.brand = body.get("brand") or engine.brand or "Samsung"
-    engine.model_name = body.get("model_name") or engine.model_name or "QN65S95D"
-    m = MockMeter(); m.connect("MOCK")
-    g = MockGenerator(); g.connect("MOCK")
-    engine.meter = m
-    engine.generator = g
+    from core.equipment.mock import MockMeter, MockGenerator
+    engine.meter = MockMeter()
+    engine.generator = MockGenerator()
     return jsonify({"ok": True, "ready": engine.is_ready})
+
+
+@bp.route("/disconnect", methods=["POST"])
+def disconnect_all() -> Response:
+    """Disconnect all equipment."""
+    engine = _get_engine()
+    engine.disconnect_all()
+    engine.meter = None
+    engine.generator = None
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Port scan
+# ---------------------------------------------------------------------------
+
+@bp.route("/ports", methods=["GET"])
+def list_ports() -> Response:
+    """Return a sorted list of available serial port device names."""
+    try:
+        import serial.tools.list_ports
+        ports = sorted(p.device for p in serial.tools.list_ports.comports())
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc), "ports": []}), 500
+    return jsonify({"ok": True, "ports": ports})
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +218,13 @@ def run_sequence(seq_name: str) -> Response:
     if not engine.is_ready:
         return jsonify({"ok": False, "error": "Engine not ready"}), 400
 
+    # 이전 측정의 잔류 이벤트 제거 — 새 SSE 연결이 구 데이터를 받지 않도록
+    while not _progress_queue.empty():
+        try:
+            _progress_queue.get_nowait()
+        except queue.Empty:
+            break
+
     params: dict[str, Any] = request.get_json(force=True) or {}
 
     def _progress(step: str, pct: float, data: Any) -> None:
@@ -175,7 +245,12 @@ def run_sequence(seq_name: str) -> Response:
         try:
             result = engine.run_sequence(seq_name, **params)
             _last_results[seq_name] = result
-            _progress_queue.put_nowait(_sse_event({"step": seq_name, "progress": 1.0, "done": True}))
+            _update_session(engine, seq_name, params, result)
+            save_path = _save_all_session(engine)
+            _progress_queue.put_nowait(_sse_event({
+                "step": seq_name, "progress": 1.0, "done": True,
+                "auto_save_path": save_path,
+            }))
         except Exception as exc:
             _progress_queue.put_nowait(_sse_event({"error": str(exc)}))
 
@@ -183,6 +258,29 @@ def run_sequence(seq_name: str) -> Response:
     thread.start()
 
     return jsonify({"ok": True, "seq_name": seq_name})
+
+
+# ---------------------------------------------------------------------------
+# Auto-save directory
+# ---------------------------------------------------------------------------
+
+@bp.route("/auto_save_dir", methods=["GET"])
+def get_auto_save_dir() -> Response:
+    engine = _get_engine()
+    return jsonify({"ok": True, "path": engine.auto_save_dir})
+
+
+@bp.route("/auto_save_dir", methods=["POST"])
+def set_auto_save_dir():
+    body = request.get_json(force=True) or {}
+    path = body.get("path", "").strip()
+    if path:
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+    _get_engine().auto_save_dir = path
+    return jsonify({"ok": True, "path": path})
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,8 @@ if TYPE_CHECKING:
 # 10% APL 정사각형 윈도우: W=31.6%, H=31.6% (블랙 바탕 + 흰색 박스)
 # 31.6² / 100 = 9.9856% ≈ 10% APL
 _APL_PCT = 10.0
-_WINDOW_SIDE_PCT = 31.6  # % (H=31.6, W=31.6 — 규격 고정값)
+# _WINDOW_SIDE_PCT = 31.6  # % (H=31.6, W=31.6 — 규격 고정값)
+_WINDOW_SIDE_PCT = (_APL_PCT/100.0)**0.5*100  # % (H=31.6, W=31.6 — 규격 고정값)
 
 
 class LumSwingSequence:
@@ -94,17 +95,23 @@ class LumSwingSequence:
             meter.set_current_pattern(pattern_info)  # type: ignore[attr-defined]
 
         results: List[MeasureResult] = []
-        for _ in range(sample_count):
+        # Absolute-time scheduling: sample i targets start + i*interval_sec.
+        # If one measurement runs long the next deadline is already closer,
+        # so the loop self-corrects instead of drifting further.
+        schedule_start = time.monotonic()
+
+        for i in range(sample_count):
             if self._stop_event.is_set():
                 break
-            t0 = time.monotonic()
+            wait_sec = (schedule_start + i * interval_sec) - time.monotonic()
+            if wait_sec > 0:
+                if self._stop_event.wait(timeout=wait_sec):
+                    break  # stop was signalled during wait
+            if self._stop_event.is_set():
+                break
             with self._engine.meter_lock:
                 result = meter.measure()
             results.append(result)
             callback(result)
-            # Sleep the remainder of the interval; interruptible by stop()
-            remaining = interval_sec - (time.monotonic() - t0)
-            if remaining > 0:
-                self._stop_event.wait(timeout=remaining)
 
         return results

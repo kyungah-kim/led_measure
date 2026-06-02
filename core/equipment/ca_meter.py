@@ -7,6 +7,7 @@ from typing import Optional
 import serial
 
 from .base import MeterBase, MeasureResult, PatternInfo
+from ..colorimetry import xy_to_cct_duv
 
 # ---------------------------------------------------------------------------
 # CA-410 serial parameters (Konica Minolta spec — Linux/Windows 공통)
@@ -61,8 +62,8 @@ class CaMeter(MeterBase):
     SUPPORTED_MODELS = ("CA-310", "CA-410")
 
     _CMD_TIMEOUT = 3.0   # COM,1 / IDQ 응답 대기
-    _MES_TIMEOUT = 8.0   # MES 측정 응답 대기 (저휘도 시 느릴 수 있음)
-    _MES_WAIT    = 0.3   # MES 전송 후 최소 대기
+    _MES_TIMEOUT = 5.0   # MES 측정 응답 대기 (read_until(\r) 기준 — 저휘도 시 대비)
+    _MES_WAIT    = 0.1   # MES 전송 후 최소 대기
 
     def __init__(self, model: str = "CA-410") -> None:
         if model not in self.SUPPORTED_MODELS:
@@ -222,12 +223,13 @@ class CaMeter(MeterBase):
             denom = -2 * cx + 12 * cy + 3
             up = (4 * cx / denom) if denom != 0 else 0.0
             vp = (9 * cy / denom) if denom != 0 else 0.0
+            cct, duv = xy_to_cct_duv(cx, cy)
             return MeasureResult(
                 timestamp_ms=timestamp_ms,
                 Lv=Lv, x=cx, y=cy,
                 u_prime=up, v_prime=vp,
                 X=X, Y=Y, Z=Z,
-                cct=0.0, duv=0.0,
+                cct=cct, duv=duv,
                 pattern_info=self._current_pattern,
             )
 
@@ -238,14 +240,19 @@ class CaMeter(MeterBase):
     # ------------------------------------------------------------------
 
     def _cmd(self, cmd: bytes, wait: float = 0.1, timeout: float = 3.0) -> str:
-        """명령 전송 → 응답 한 줄 반환."""
+        """명령 전송 → 응답 한 줄 반환.
+
+        CA-410 응답은 CR(\r)로 끝나므로 read_until(b'\\r')을 사용한다.
+        readline()은 LF(\n)를 기다리다 타임아웃(8 s)되어 지연이 발생한다.
+        """
         try:
             self._serial.reset_input_buffer()
             self._serial.write(cmd)
             if wait > 0:
                 time.sleep(wait)
             self._serial.timeout = timeout
-            resp = self._serial.readline().decode("ascii", errors="replace").strip()
+            raw = self._serial.read_until(b"\r")
+            resp = raw.decode("ascii", errors="replace").strip()
             if not resp:
                 extra = self._serial.read_all().decode("ascii", errors="replace").strip()
                 resp = extra

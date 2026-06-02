@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import statistics
 from datetime import datetime
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import openpyxl
 from openpyxl.chart import LineChart, Reference, ScatterChart
@@ -163,63 +163,87 @@ class ExcelExporter:
         model: str,
         file_path: str | None = None,
     ) -> str:
-        """케이스(A/B/C)별 시트 + 시간-Lv 라인 차트."""
+        """단일 시트 피벗: 행=측정#, 열=모드(SDR_Vivid 등), 값=Lv."""
         wb = openpyxl.Workbook()
         wb.remove(wb.active)
         _add_info_sheet(wb, brand, model, "Luminance Swing")
 
-        headers = [h for h, *_ in _MEAS_COLS]
-        widths  = [w for *_, w in _MEAS_COLS]
+        ws = wb.create_sheet("LumSwing")
+        keys = sorted(results_by_case.keys())
+        max_n = max((len(v) for v in results_by_case.values()), default=0)
 
-        for case_label, results in sorted(results_by_case.items()):
-            ws = wb.create_sheet(title=f"Case_{case_label}")
-            _write_header_row(ws, 1, headers)
-            _set_col_widths(ws, widths)
-            _freeze(ws, "B2")
+        # 헤더: # | SDR_Vivid | SDR_Standard | ...
+        _write_header_row(ws, 1, ["#"] + keys)
+        ws.column_dimensions["A"].width = 6
+        for ci in range(2, len(keys) + 2):
+            ws.column_dimensions[get_column_letter(ci)].width = 14
+        _freeze(ws, "B2")
 
-            for ri, r in enumerate(results, 2):
-                _write_meas_row(ws, ri, r, seq=ri - 1)
+        # 데이터 행
+        for i in range(max_n):
+            ri = i + 2
+            idx_cell = ws.cell(row=ri, column=1, value=i + 1)
+            idx_cell.alignment = _CENTER
+            idx_cell.border = _BORDER
+            idx_cell.font = _BASE_FONT
+            for ci, key in enumerate(keys, 2):
+                row_list = results_by_case.get(key, [])
+                val = row_list[i].Lv if i < len(row_list) else None
+                c = ws.cell(row=ri, column=ci, value=val)
+                c.number_format = _FMT_LV
+                c.alignment = _CENTER
+                c.border = _BORDER
+                c.font = _BASE_FONT
 
-            # 통계 행
-            if results:
-                lvs = [r.Lv for r in results]
-                stat_row = len(results) + 3
-                ws.cell(row=stat_row, column=1, value="Statistics").font = _BOLD_FONT
-                for label, val in [("Count", len(lvs)),
-                                   ("Mean Lv",  round(statistics.mean(lvs), 3)),
-                                   ("Max Lv",   round(max(lvs), 3)),
-                                   ("Min Lv",   round(min(lvs), 3)),
-                                   ("Std Dev",  round(statistics.stdev(lvs), 4) if len(lvs) > 1 else 0)]:
-                    stat_row += 1
-                    ws.cell(row=stat_row, column=1, value=label).font = _BOLD_FONT
-                    ws.cell(row=stat_row, column=2, value=val).number_format = _FMT_LV
+        # 통계 블록
+        if max_n > 0:
+            stat_row = max_n + 3
+            ws.cell(row=stat_row, column=1, value="Statistics").font = _BOLD_FONT
+            stat_row += 1
+            for label in ["Count", "Mean Lv", "Max Lv", "Min Lv", "Std Dev"]:
+                ws.cell(row=stat_row, column=1, value=label).font = _BOLD_FONT
+                for ci, key in enumerate(keys, 2):
+                    lvs = [r.Lv for r in results_by_case.get(key, [])]
+                    if not lvs:
+                        continue
+                    if   label == "Count":   val = len(lvs)
+                    elif label == "Mean Lv": val = round(statistics.mean(lvs), 3)
+                    elif label == "Max Lv":  val = round(max(lvs), 3)
+                    elif label == "Min Lv":  val = round(min(lvs), 3)
+                    else:                    val = round(statistics.stdev(lvs), 4) if len(lvs) > 1 else 0
+                    c = ws.cell(row=stat_row, column=ci, value=val)
+                    c.number_format = _FMT_LV
+                    c.alignment = _CENTER
+                    c.border = _BORDER
+                stat_row += 1
 
-            self._add_lv_chart(ws, len(results), f"Case {case_label}")
+        if max_n >= 2:
+            self._add_swing_pivot_chart(ws, keys, max_n)
 
-        case_str = "-".join(f"Case{k}" for k in sorted(results_by_case.keys()))
-        path = file_path or _default_path(brand, model, f"LumSwing_{case_str}")
+        path = file_path or _default_path(brand, model, "LumSwing")
         wb.save(path)
         return path
 
-    def _add_lv_chart(self, ws, data_rows: int, title: str) -> None:
+    def _add_swing_pivot_chart(self, ws, keys: list, data_rows: int) -> None:
         if data_rows < 2:
             return
         chart = LineChart()
-        chart.title = f"Luminance Swing — {title}"
+        chart.title = "Luminance Swing"
         chart.style = 10
         chart.y_axis.title = "Lv (cd/m²)"
-        chart.x_axis.title = "Time (ms)"
+        chart.x_axis.title = "측정 #"
         chart.width  = 26
         chart.height = 14
 
-        # Lv = col B(2), Timestamp = col A(1)
-        lv_ref   = Reference(ws, min_col=2, min_row=1, max_row=data_rows + 1)
-        time_ref = Reference(ws, min_col=1, min_row=2, max_row=data_rows + 1)
-        chart.add_data(lv_ref, titles_from_data=True)
-        chart.set_categories(time_ref)
-        chart.series[0].graphicalProperties.line.solidFill = "1F4E79"
-        chart.series[0].graphicalProperties.line.width = 15000  # 1.5pt
+        _COLORS = ["1F4E79", "C55A11", "375623", "7030A0", "FF0000", "00B0F0"]
+        for i, key in enumerate(keys):
+            ref = Reference(ws, min_col=i + 2, min_row=1, max_row=data_rows + 1)
+            chart.add_data(ref, titles_from_data=True)
+            chart.series[i].graphicalProperties.line.solidFill = _COLORS[i % len(_COLORS)]
+            chart.series[i].graphicalProperties.line.width = 15000
 
+        cat_ref = Reference(ws, min_col=1, min_row=2, max_row=data_rows + 1)
+        chart.set_categories(cat_ref)
         ws.add_chart(chart, f"A{data_rows + 6}")
 
     # ── 2. Luminance Loading ──────────────────────────────────────────────────
@@ -431,11 +455,11 @@ class ExcelExporter:
         _set_col_widths(ws, meas_widths, col_offset=3)
         _freeze(ws, "B2")
 
-        sorted_items = sorted(results.items(), reverse=True)  # 100% → 0%
+        sorted_items = sorted(results.items(), reverse=True)  # Full White first, then 100%→14.1%
 
         for ri, (win_size, r) in enumerate(sorted_items, 2):
-            # 명암비: 흰 바탕(0% window) 대비
-            if ref_lv_val and r.Lv > 0:
+            # CR: full white / black window Lv (full white row itself shows "—")
+            if ref_lv_val and r.Lv > 0 and win_size > 0.0:
                 cr_val = round(ref_lv_val / r.Lv, 1)
             else:
                 cr_val = None
@@ -443,8 +467,10 @@ class ExcelExporter:
             fill = _GREEN_FILL if win_size == 0.0 else (
                    _YELLOW_FILL if win_size <= 20.0 else None)
 
+            win_label = "Full White" if win_size == 0.0 else win_size
+            win_fmt = "@" if win_size == 0.0 else _FMT_RATIO
             for ci, (val, fmt) in enumerate(
-                [(win_size, _FMT_RATIO), (r.Lv, _FMT_LV), (cr_val, _FMT_RATIO)], 1
+                [(win_label, win_fmt), (r.Lv, _FMT_LV), (cr_val, _FMT_RATIO)], 1
             ):
                 c = ws.cell(row=ri, column=ci, value=val)
                 c.number_format = fmt
@@ -463,7 +489,163 @@ class ExcelExporter:
         wb.save(path)
         return path
 
-    # ── 5. Report Template ────────────────────────────────────────────────────
+    # ── 5. All-session combined export ───────────────────────────────────────
+
+    def export_all_session(
+        self,
+        brand: str,
+        model: str,
+        session_swing:    Dict[str, Any],   # "SDR_Vivid" → [MeasureResult]
+        session_loading:  Dict[str, Any],   # "SDR_Vivid" → {apl → [MeasureResult]}
+        session_gamut:    Dict[str, Any],   # "SDR"/"HDR" → {color → MeasureResult}
+        session_contrast: Dict[str, Any],   # "SDR"/"HDR" → {side → MeasureResult}
+        file_path: str = "",
+    ) -> str:
+        """{brand}_{model}_all.xlsx — 모든 측정 결과를 탭으로 나눠 통합 저장."""
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+        _add_info_sheet(wb, brand, model, "All Sessions")
+
+        meas_headers = [h for h, *_ in _MEAS_COLS]
+        meas_widths  = [w for *_, w in _MEAS_COLS]
+
+        # ── 휘도 스윙 (피벗: 행=#, 열=모드, 값=Lv) ──────────────────────────
+        if session_swing:
+            swing_keys = sorted(k for k, v in session_swing.items() if v)
+            if swing_keys:
+                max_n = max(len(session_swing[k]) for k in swing_keys)
+                ws_sw = wb.create_sheet("LumSwing")
+                _write_header_row(ws_sw, 1, ["#"] + swing_keys)
+                ws_sw.column_dimensions["A"].width = 6
+                for ci in range(2, len(swing_keys) + 2):
+                    ws_sw.column_dimensions[get_column_letter(ci)].width = 14
+                _freeze(ws_sw, "B2")
+                for i in range(max_n):
+                    ri = i + 2
+                    idx_c = ws_sw.cell(row=ri, column=1, value=i + 1)
+                    idx_c.alignment = _CENTER
+                    idx_c.border = _BORDER
+                    idx_c.font = _BASE_FONT
+                    for ci, key in enumerate(swing_keys, 2):
+                        row_list = session_swing.get(key, [])
+                        val = row_list[i].Lv if i < len(row_list) else None
+                        c = ws_sw.cell(row=ri, column=ci, value=val)
+                        c.number_format = _FMT_LV
+                        c.alignment = _CENTER
+                        c.border = _BORDER
+                        c.font = _BASE_FONT
+                # 통계
+                stat_row = max_n + 3
+                ws_sw.cell(row=stat_row, column=1, value="Statistics").font = _BOLD_FONT
+                stat_row += 1
+                for label in ["Count", "Mean Lv", "Max Lv", "Min Lv"]:
+                    ws_sw.cell(row=stat_row, column=1, value=label).font = _BOLD_FONT
+                    for ci, key in enumerate(swing_keys, 2):
+                        lvs = [r.Lv for r in session_swing.get(key, [])]
+                        if not lvs:
+                            continue
+                        if   label == "Count":   val = len(lvs)
+                        elif label == "Mean Lv": val = round(statistics.mean(lvs), 3)
+                        elif label == "Max Lv":  val = round(max(lvs), 3)
+                        else:                    val = round(min(lvs), 3)
+                        c = ws_sw.cell(row=stat_row, column=ci, value=val)
+                        c.number_format = _FMT_LV
+                        c.alignment = _CENTER
+                        c.border = _BORDER
+                    stat_row += 1
+                if max_n >= 2:
+                    self._add_swing_pivot_chart(ws_sw, swing_keys, max_n)
+
+        # ── APL 로딩 Summary ──────────────────────────────────────────────────
+        if session_loading:
+            cases    = sorted(session_loading.keys())
+            all_apls = sorted({apl for cd in session_loading.values() for apl in cd})
+            ws_sum = wb.create_sheet("Loading_Summary")
+            hdr = ["APL (%)"]
+            for c in cases:
+                hdr += [f"{c} Avg", f"{c} Max", f"{c} Min"]
+            _write_header_row(ws_sum, 1, hdr)
+            ws_sum.column_dimensions["A"].width = 10
+            for ci in range(2, len(hdr) + 1):
+                ws_sum.column_dimensions[get_column_letter(ci)].width = 14
+            for ri, apl in enumerate(all_apls, 2):
+                ws_sum.cell(row=ri, column=1, value=apl).alignment = _CENTER
+                ci = 2
+                for case in cases:
+                    lvs = [r.Lv for r in session_loading.get(case, {}).get(apl, [])]
+                    avg = round(statistics.mean(lvs), 3) if lvs else None
+                    mx  = round(max(lvs), 3)             if lvs else None
+                    mn  = round(min(lvs), 3)             if lvs else None
+                    for val in [avg, mx, mn]:
+                        c2 = ws_sum.cell(row=ri, column=ci, value=val)
+                        c2.number_format = _FMT_LV
+                        c2.alignment = _CENTER
+                        c2.border = _BORDER
+                        ci += 1
+            _freeze(ws_sum, "B2")
+            # 케이스별 Raw 시트
+            for case, apl_dict in sorted(session_loading.items()):
+                ws_raw = wb.create_sheet(f"Loading_{case}"[:31])
+                headers_raw = ["APL (%)", "#"] + meas_headers
+                _write_header_row(ws_raw, 1, headers_raw)
+                _set_col_widths(ws_raw, [10, 6] + meas_widths)
+                _freeze(ws_raw, "C2")
+                ri = 2
+                for apl in sorted(apl_dict):
+                    for idx, r in enumerate(apl_dict[apl], 1):
+                        ws_raw.cell(row=ri, column=1, value=apl).alignment = _CENTER
+                        ws_raw.cell(row=ri, column=2, value=idx).alignment = _CENTER
+                        _write_meas_row(ws_raw, ri, r, col_offset=2)
+                        ri += 1
+
+        # ── 색재현율 ──────────────────────────────────────────────────────────
+        color_order = ["red", "green", "blue", "white", "black"]
+        for mode_key, gamut_results in sorted(session_gamut.items()):
+            if not gamut_results:
+                continue
+            ws = wb.create_sheet(f"Gamut_{mode_key}"[:31])
+            _write_header_row(ws, 1, ["Color"] + meas_headers)
+            _set_col_widths(ws, [8] + meas_widths)
+            _freeze(ws, "B2")
+            for ri, color in enumerate(color_order, 2):
+                r = gamut_results.get(color)
+                ws.cell(row=ri, column=1, value=color.capitalize()).font = _BOLD_FONT
+                ws.cell(row=ri, column=1).alignment = _CENTER
+                ws.cell(row=ri, column=1).border = _BORDER
+                if r:
+                    _write_meas_row(ws, ri, r, col_offset=1)
+
+        # ── 명암비 ────────────────────────────────────────────────────────────
+        for mode_key, contrast_results in sorted(session_contrast.items()):
+            if not contrast_results:
+                continue
+            ws = wb.create_sheet(f"Contrast_{mode_key}"[:31])
+            _write_header_row(ws, 1, ["Black H/V (%)", "Lv (cd/m²)", "CR (White/Lv)"] + meas_headers)
+            _set_col_widths(ws, [14, 14, 14] + meas_widths)
+            _freeze(ws, "B2")
+            # 기준: Full White (0.0)
+            ref_lv = None
+            if 0.0 in contrast_results:
+                ref_lv = contrast_results[0.0].Lv
+            for ri, side in enumerate(sorted(contrast_results, reverse=True), 2):
+                r = contrast_results[side]
+                cr = round(ref_lv / r.Lv, 1) if (ref_lv and r.Lv > 0 and side > 0.0) else None
+                side_label = "Full White" if side == 0.0 else side
+                side_fmt = "@" if side == 0.0 else _FMT_RATIO
+                for ci, (val, fmt) in enumerate(
+                    [(side_label, side_fmt), (r.Lv, _FMT_LV), (cr, _FMT_RATIO)], 1
+                ):
+                    c2 = ws.cell(row=ri, column=ci, value=val)
+                    c2.number_format = fmt
+                    c2.alignment = _CENTER
+                    c2.border = _BORDER
+                _write_meas_row(ws, ri, r, col_offset=3)
+
+        path = file_path or _default_path(brand, model, "all")
+        wb.save(path)
+        return path
+
+    # ── 6. Report Template ────────────────────────────────────────────────────
 
     def export_report_template(
         self,
@@ -641,11 +823,13 @@ class ExcelExporter:
             _set_col_widths(ws_cr, meas_widths, col_offset=3)
             _freeze(ws_cr, "B2")
             for ri, (win_size, r) in enumerate(sorted(contrast_results.items(), reverse=True), 2):
-                cr_val = round(ref_lv_val / r.Lv, 1) if (ref_lv_val and r.Lv > 0) else None
+                cr_val = round(ref_lv_val / r.Lv, 1) if (ref_lv_val and r.Lv > 0 and win_size > 0.0) else None
                 fill = _GREEN_FILL if win_size == 0.0 else (
                        _YELLOW_FILL if win_size <= 20.0 else None)
+                win_label = "Full White" if win_size == 0.0 else win_size
+                win_fmt = "@" if win_size == 0.0 else _FMT_RATIO
                 for ci, (val, fmt) in enumerate(
-                    [(win_size, _FMT_RATIO), (r.Lv, _FMT_LV), (cr_val, _FMT_RATIO)], 1
+                    [(win_label, win_fmt), (r.Lv, _FMT_LV), (cr_val, _FMT_RATIO)], 1
                 ):
                     c = ws_cr.cell(row=ri, column=ci, value=val)
                     c.number_format = fmt
