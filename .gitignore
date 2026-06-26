@@ -34,3 +34,4 @@ Thumbs.db
 
 # 측정 결과 xlsx
 *.xlsx
+.github/
