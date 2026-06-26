@@ -123,6 +123,11 @@ class VgGenerator(GeneratorBase):
         self._last_pattern = cfg
 
     def set_hdr(self, enabled: bool) -> None:
+        # 이미 같은 상태면 타이밍 리셋·InfoFrame 재전송 없이 즉시 반환.
+        # AutoAll 처럼 HDR 구간을 연속 실행할 때 각 시퀀스마다 set_hdr(True)를
+        # 호출해도 _setup_hdr10()의 1초 대기·EXPDN4 재로드가 발생하지 않는다.
+        if self._is_hdr == enabled:
+            return
         if enabled:
             self._setup_hdr10()
         else:
@@ -131,6 +136,9 @@ class VgGenerator(GeneratorBase):
 
     def set_sdr(self) -> None:
         """4K 60p SDR 출력으로 전환한다."""
+        # 이미 SDR이고 타이밍이 로드된 상태면 재초기화 불필요 (패턴 유지).
+        if not self._is_hdr and self._timing_loaded:
+            return
         self._timing_loaded = False
         self._load_init_pattern(sleep=1.0)
         # SHDR4 Off: Dynamic Range InfoFrame을 명시적으로 끔
@@ -172,13 +180,19 @@ class VgGenerator(GeneratorBase):
     def _prepare_pattern_base(self) -> None:
         """패턴 출력 전 타이밍 초기화 (필요할 때만).
 
-        SDR: _timing_loaded=False 일 때만 EXPDN4(2286,0) 로드.
-             set_sdr() / reset() 이 이미 로드했으면 재로드 안 함
-             → gamut R→G→B 전환 시 컬러바 깜빡임 방지.
+        SDR: _timing_loaded=False 이거나 직전 패턴이 raster_window 인 경우
+             EXPDN4(2286,0) 를 재로드한다.
+             raster_window 는 SPTS4/EXPDN4(9999,0) 로 white raster 를 활성화하며
+             ALLCLR4 만으로는 program 9999 의 상태가 남아 후속 패턴이 full-white
+             로 보이는 문제가 발생한다. 재로드로 program 9999 를 클린 상태로 리셋.
         HDR: _setup_hdr10() 이 SHDMI4/SIF4/SHDR4 로 설정했으므로 항상 스킵.
         """
-        if not self._is_hdr and not self._timing_loaded:
-            self._load_init_pattern(sleep=1.5)
+        prev_is_raster = (
+            self._last_pattern is not None
+            and self._last_pattern.type == "raster_window"
+        )
+        if not self._is_hdr and (not self._timing_loaded or prev_is_raster):
+            self._load_init_pattern(sleep=1.0)
 
     def _scale_rgb_for_output(
         self,
@@ -475,10 +489,17 @@ class VgGenerator(GeneratorBase):
 
     def _send(self, frame: bytes) -> dict:
         if not self.is_connected:
-            raise RuntimeError("VgGenerator is not connected")
-        self._serial.reset_input_buffer()
-        self._serial.write(frame)
-        return self._read_response()
+            raise RuntimeError("패턴 제너레이터가 연결되어 있지 않습니다")
+        assert self._serial is not None
+        try:
+            self._serial.reset_input_buffer()
+            self._serial.write(frame)
+        except Exception as e:
+            raise RuntimeError(f"패턴 제너레이터 전송 실패 (포트 확인): {e}") from e
+        result = self._read_response()
+        if result.get("status") == "error":
+            raise RuntimeError(f"패턴 제너레이터 응답 오류: {result.get('error')}")
+        return result
 
     def _read_response(self) -> dict:
         buf = bytearray()

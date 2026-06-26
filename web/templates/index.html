@@ -78,6 +78,7 @@
     <div class="sidebar-item" onclick="showPanel('lum_loading',this)">📊 3. APL 로딩</div>
     <div class="sidebar-item" onclick="showPanel('gamut',this)">🎨 4. 색재현율</div>
     <div class="sidebar-item" onclick="showPanel('contrast',this)">⬛ 5. 명암비</div>
+    <div class="sidebar-item" onclick="showPanel('autoall',this)">🤖 전체 자동화</div>
     <div class="sidebar-item" onclick="showPanel('report',this)">📋 보고서 템플릿</div>
   </nav>
 
@@ -366,29 +367,138 @@
       </div>
     </div>
 
+    <!-- ═══ 전체 자동화 ════════════════════════════════════════════════ -->
+    <div class="step-panel" id="panel-autoall">
+      <!-- 모드 전환 오버레이 -->
+      <div id="autoall-mode-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;">
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:32px 40px;text-align:center;max-width:420px;">
+          <div style="font-size:18px;font-weight:700;margin-bottom:8px;" id="autoall-overlay-title">모드 전환</div>
+          <div style="color:var(--muted);font-size:13px;margin-bottom:24px;" id="autoall-overlay-desc">TV를 해당 PSM 모드로 전환한 뒤 버튼을 누르세요.</div>
+          <button class="btn btn-green" style="font-size:14px;padding:10px 28px;" onclick="confirmAutoAllMode()">✔ 전환 완료</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+          <span style="font-size:14px;font-weight:700;">🤖 전체 자동화 측정</span>
+          <span style="font-size:11px;color:var(--muted);">6개 PSM 모드 × 측정 순서 — 총 14단계</span>
+        </div>
+        <!-- 설정 행 -->
+        <div class="form-row" style="margin-bottom:14px;gap:14px;flex-wrap:wrap;">
+          <div class="form-group">
+            <label>APL 단계</label>
+            <select id="autoall-version">
+              <option value="37">37단계</option>
+              <option value="10">10단계</option>
+              <option value="2">2단계</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>측정 횟수</label>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <input type="number" id="autoall-meas-count" value="1" min="1" max="10" style="width:60px;text-align:center;">
+              <span style="font-size:12px;color:var(--muted);">회</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>쿨링</label>
+            <div class="switch-group">
+              <button class="switch-btn on" id="autoall-cool-off" onclick="setAutoAllCooling(false)">Off</button>
+              <button class="switch-btn" id="autoall-cool-on"  onclick="setAutoAllCooling(true)">On</button>
+            </div>
+          </div>
+          <div class="form-group" id="autoall-cool-apl-group" style="display:none;">
+            <label>APL &lt;</label>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <input type="number" id="autoall-cool-apl" value="10" min="1" max="100" style="width:55px;text-align:center;">
+              <span style="font-size:12px;color:var(--muted);">%</span>
+            </div>
+          </div>
+          <div class="form-group" id="autoall-cool-sec-group" style="display:none;">
+            <label>쿨링 시간</label>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <input type="number" id="autoall-cool-sec" value="5" min="1" max="60" style="width:55px;text-align:center;">
+              <span style="font-size:12px;color:var(--muted);">초 Black</span>
+            </div>
+          </div>
+        </div>
+        <!-- 버튼 행 -->
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;">
+          <button class="btn btn-green" id="autoall-start-btn" onclick="startAutoAll()">▶ 시작</button>
+          <button class="btn btn-red"   id="autoall-stop-btn"  onclick="stopAutoAll()" disabled>■ 중지</button>
+        </div>
+        <!-- 전체 진행바 -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap;">전체 진행</span>
+          <div class="progress-bar-wrap" style="flex:1;margin:0;">
+            <div class="progress-bar" id="autoall-total-prog" style="width:0%"></div>
+          </div>
+          <span id="autoall-total-pct" style="font-size:11px;color:var(--muted);min-width:32px;text-align:right;">0%</span>
+        </div>
+        <div id="autoall-status" style="font-size:12px;color:var(--muted);margin-top:4px;">대기 중</div>
+      </div>
+
+      <!-- 14단계 카드 그리드 -->
+      <div class="card">
+        <h2>측정 단계 진행 현황</h2>
+        <div style="overflow-x:auto;">
+          <table style="min-width:520px;font-size:12px;">
+            <thead>
+              <tr>
+                <th style="width:110px;">모드</th>
+                <th>스윙</th><th>APL 로딩</th><th>색재현율</th><th>명암비</th>
+              </tr>
+            </thead>
+            <tbody id="autoall-step-tbody">
+              <!-- JS로 채움 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ 보고서 템플릿 ════════════════════════════════════════════════ -->
     <div class="step-panel" id="panel-report">
       <div class="card">
-        <h2>보고서 템플릿 업로드</h2>
-        <div class="form-row" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+          <span style="font-size:14px;font-weight:700;">📋 보고서 템플릿</span>
+        </div>
+        <!-- 1행: 파일 + 형식 + 집계 -->
+        <div class="form-row" style="margin-bottom:12px;gap:10px;flex-wrap:wrap;align-items:flex-end;">
           <div class="form-group">
-            <label>템플릿 형식</label>
-            <select id="report-type">
+            <label>xlsx 파일 선택 (복수 가능)</label>
+            <input type="file" id="report-files" accept=".xlsx" multiple
+                   style="width:auto;background:transparent;border:none;color:var(--text);padding:0;">
+          </div>
+          <button class="btn btn-primary" onclick="loadReportFiles()">📂 파일 불러오기</button>
+          <div class="form-group">
+            <label>보고서 형식</label>
+            <select id="report-fmt" onchange="refreshReportTable()">
               <option value="competitor">경쟁사 비교 장표</option>
               <option value="optical">광학 측정 데이터</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>xlsx 파일 선택</label>
-            <input type="file" id="report-file" accept=".xlsx,.xls" style="width:auto;background:transparent;border:none;color:var(--text);padding:0;">
-          </div>
-          <button class="btn btn-primary" onclick="loadReportTemplate()">📂 템플릿 로드</button>
+          <button class="btn btn-outline" onclick="clearReportModels()" style="color:var(--red);border-color:var(--red);">✕ 전체 삭제</button>
+          <button class="btn btn-outline" onclick="deleteReportModel()">선택 삭제</button>
         </div>
-        <div id="report-status" style="font-size:13px;color:var(--muted);">xlsx 파일을 업로드하면 항목이 표시됩니다.</div>
+        <!-- 2행: 모델 목록 -->
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">불러온 모델 목록</label>
+          <div id="report-model-list" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;">
+            <span style="color:var(--muted);font-size:12px;">파일을 불러오면 모델이 표시됩니다.</span>
+          </div>
+        </div>
+        <div id="report-status" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
+        <!-- 3행: 내보내기 -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-green" onclick="exportReportPpt()">📊 PPT 저장</button>
+          <button class="btn btn-outline" onclick="copyReportTable()">📋 클립보드 복사</button>
+        </div>
       </div>
+      <!-- 비교 테이블 -->
       <div class="card" id="report-table-card" style="display:none;">
-        <h2>템플릿 미리보기</h2>
-        <div id="report-table-wrap"></div>
+        <h2>비교 테이블</h2>
+        <div id="report-table-wrap" style="overflow-x:auto;max-height:60vh;overflow-y:auto;"></div>
       </div>
     </div>
 
@@ -581,7 +691,11 @@ function connectSSE(onData, onDone) {
     if (d.done) { onDone && onDone(d); _sseSource.close(); return; }
     onData && onData(d);
   };
-  _sseSource.onerror = () => { log('SSE 연결 끊김'); };
+  _sseSource.onerror = () => {
+    log('SSE 연결 끊김');
+    // 자동 재연결 방지 — 완료 후 onerror 가 다시 오면 닫기
+    if (_sseSource) { _sseSource.close(); _sseSource = null; }
+  };
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1283,34 +1397,291 @@ function startContrast() {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// 전체 자동화 (AutoAll)
+// ════════════════════════════════════════════════════════════════════════
+let _autoAllCooling = false;
+
+// 14단계 정의 — desktop worker._ALL_STEPS 와 동일
+const _AA_STEPS = [
+  { is_hdr: false, case: 'Vivid',    seq: 'lum_swing',    label: '스윙' },
+  { is_hdr: false, case: 'Vivid',    seq: 'lum_loading',  label: 'APL' },
+  { is_hdr: false, case: 'Vivid',    seq: 'gamut',        label: '색재현율' },
+  { is_hdr: false, case: 'Vivid',    seq: 'contrast',     label: '명암비' },
+  { is_hdr: false, case: 'Standard', seq: 'lum_swing',    label: '스윙' },
+  { is_hdr: false, case: 'Standard', seq: 'lum_loading',  label: 'APL' },
+  { is_hdr: false, case: 'Cinema',   seq: 'lum_swing',    label: '스윙' },
+  { is_hdr: false, case: 'Cinema',   seq: 'lum_loading',  label: 'APL' },
+  { is_hdr: true,  case: 'Vivid',    seq: 'lum_swing',    label: '스윙' },
+  { is_hdr: true,  case: 'Vivid',    seq: 'lum_loading',  label: 'APL' },
+  { is_hdr: true,  case: 'Standard', seq: 'lum_swing',    label: '스윙' },
+  { is_hdr: true,  case: 'Standard', seq: 'lum_loading',  label: 'APL' },
+  { is_hdr: true,  case: 'Cinema',   seq: 'lum_swing',    label: '스윙' },
+  { is_hdr: true,  case: 'Cinema',   seq: 'lum_loading',  label: 'APL' },
+];
+const _AA_ROWS = [
+  { mode: 'SDR Vivid',    is_hdr: false, case: 'Vivid',    row: 0 },
+  { mode: 'SDR Standard', is_hdr: false, case: 'Standard', row: 1 },
+  { mode: 'SDR Cinema',   is_hdr: false, case: 'Cinema',   row: 2 },
+  { mode: 'HDR Vivid',    is_hdr: true,  case: 'Vivid',    row: 3 },
+  { mode: 'HDR Standard', is_hdr: true,  case: 'Standard', row: 4 },
+  { mode: 'HDR Cinema',   is_hdr: true,  case: 'Cinema',   row: 5 },
+];
+// step_idx → (rowIdx, colKey)
+const _AA_SEQ_COLS = ['lum_swing', 'lum_loading', 'gamut', 'contrast'];
+
+function _buildAutoAllGrid() {
+  const tbody = document.getElementById('autoall-step-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  _AA_ROWS.forEach((r, ri) => {
+    const tr = document.createElement('tr');
+    tr.id = `aa-row-${ri}`;
+    let cells = `<td style="font-size:11px;font-weight:600;color:var(--muted);padding:4px 8px;">${r.mode}</td>`;
+    _AA_SEQ_COLS.forEach(col => {
+      // gamut/contrast 는 Vivid SDR 만 해당, 나머지는 회색 처리
+      const applicable = (col === 'lum_swing' || col === 'lum_loading') ||
+                         (r.case === 'Vivid' && !r.is_hdr);
+      cells += `<td id="aa-cell-${ri}-${col}" style="text-align:center;padding:4px;font-size:11px;color:${applicable?'var(--muted)':'#2d3145'};">
+        ${applicable ? '⬜ 대기' : '—'}
+      </td>`;
+    });
+    tr.innerHTML = cells;
+    tbody.appendChild(tr);
+  });
+}
+
+function _setAaCell(stepIdx, state) {
+  const s = _AA_STEPS[stepIdx];
+  if (!s) return;
+  const ri = _AA_ROWS.findIndex(r => r.is_hdr === s.is_hdr && r.case === s.case);
+  if (ri < 0) return;
+  const cell = document.getElementById(`aa-cell-${ri}-${s.seq}`);
+  if (!cell) return;
+  const icons = { waiting: '⬜ 대기', running: '🔄 측정중', done: '✅ 완료', error: '❌ 오류' };
+  const colors = { waiting: 'var(--muted)', running: 'var(--accent)', done: 'var(--green)', error: 'var(--red)' };
+  cell.textContent = icons[state] || state;
+  cell.style.color = colors[state] || 'var(--muted)';
+}
+
+function setAutoAllCooling(v) {
+  _autoAllCooling = v;
+  document.getElementById('autoall-cool-on').className  = 'switch-btn' + (v ? ' on' : '');
+  document.getElementById('autoall-cool-off').className = 'switch-btn' + (!v ? ' on' : '');
+  document.getElementById('autoall-cool-apl-group').style.display = v ? '' : 'none';
+  document.getElementById('autoall-cool-sec-group').style.display = v ? '' : 'none';
+}
+
+async function startAutoAll() {
+  document.getElementById('autoall-start-btn').disabled = true;
+  document.getElementById('autoall-stop-btn').disabled  = false;
+  document.getElementById('autoall-total-prog').style.width = '0%';
+  document.getElementById('autoall-total-pct').textContent = '0%';
+  document.getElementById('autoall-status').textContent = '측정 준비 중...';
+  _buildAutoAllGrid();
+
+  connectSSE(
+    (d) => {
+      if (d.mode_change) {
+        const modeStr = (d.is_hdr ? 'HDR' : 'SDR') + ' ' + d.case;
+        document.getElementById('autoall-overlay-title').textContent = `📺 ${modeStr} 모드로 전환`;
+        document.getElementById('autoall-overlay-desc').textContent =
+          `TV를 "${modeStr}" PSM 모드로 전환한 뒤 아래 버튼을 누르세요.`;
+        document.getElementById('autoall-mode-overlay').style.display = 'flex';
+        document.getElementById('autoall-status').textContent = `⏸ 모드 전환 대기: ${modeStr}`;
+        log(`모드 전환 요청: ${modeStr}`);
+        return;
+      }
+      if (typeof d.progress === 'number') {
+        const pct = Math.min(100, d.progress * 100).toFixed(0) + '%';
+        document.getElementById('autoall-total-prog').style.width = pct;
+        document.getElementById('autoall-total-pct').textContent  = pct;
+      }
+      if (d.data && typeof d.data.step_idx === 'number') {
+        const si = d.data.step_idx;
+        if (d.data.completed) {
+          _setAaCell(si, 'done');
+          document.getElementById('autoall-status').textContent = `✅ 완료: ${d.data.label || ''}`;
+          log(`완료: ${d.data.label || `step ${si}`}`);
+        } else if (d.data.error) {
+          _setAaCell(si, 'error');
+          log(`오류 (step ${si}): ${d.data.error}`);
+        } else {
+          _setAaCell(si, 'running');
+          document.getElementById('autoall-status').textContent = `▶ ${d.data.label || `step ${si}`}`;
+        }
+      }
+    },
+    (d) => {
+      document.getElementById('autoall-total-prog').style.width = '100%';
+      document.getElementById('autoall-total-pct').textContent  = '100%';
+      document.getElementById('autoall-status').textContent = '✅ 전체 측정 완료';
+      document.getElementById('autoall-start-btn').disabled = false;
+      document.getElementById('autoall-stop-btn').disabled  = true;
+      log('전체 자동화 완료');
+      if (d && d.auto_save_path) _showAutoSavePath(d.auto_save_path);
+    }
+  );
+
+  const body = {
+    version:               document.getElementById('autoall-version').value,
+    cooling_enabled:       _autoAllCooling,
+    cooling_apl_threshold: parseInt(document.getElementById('autoall-cool-apl').value) || 10,
+    cooling_duration_sec:  parseFloat(document.getElementById('autoall-cool-sec').value) || 5,
+    measurements_per_step: parseInt(document.getElementById('autoall-meas-count').value) || 1,
+  };
+  const r = await fetch('/api/auto_all/run', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if (!d.ok) {
+    log('전체 자동화 시작 실패: ' + d.error);
+    document.getElementById('autoall-start-btn').disabled = false;
+    document.getElementById('autoall-stop-btn').disabled  = true;
+    if (_sseSource) { _sseSource.close(); _sseSource = null; }
+  }
+}
+
+async function stopAutoAll() {
+  if (_sseSource) { _sseSource.close(); _sseSource = null; }
+  document.getElementById('autoall-mode-overlay').style.display = 'none';
+  try { await fetch('/api/stop', { method: 'POST' }); } catch(e) {}
+  document.getElementById('autoall-start-btn').disabled = false;
+  document.getElementById('autoall-stop-btn').disabled  = true;
+  document.getElementById('autoall-status').textContent = '중지됨';
+  log('전체 자동화 중지 요청');
+}
+
+async function confirmAutoAllMode() {
+  document.getElementById('autoall-mode-overlay').style.display = 'none';
+  try { await fetch('/api/auto_all/confirm', { method: 'POST' }); } catch(e) {}
+  log('모드 전환 완료 확인');
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // 보고서 템플릿
 // ════════════════════════════════════════════════════════════════════════
-function loadReportTemplate() {
-  const fileInput = document.getElementById('report-file');
-  const reportType = document.getElementById('report-type').value;
-  const file = fileInput.files[0];
-  if (!file) {
-    document.getElementById('report-status').innerHTML = '<span style="color:var(--red)">파일을 선택해주세요.</span>';
+let _reportSelectedKey = null;
+
+async function loadReportFiles() {
+  const inp = document.getElementById('report-files');
+  if (!inp.files.length) {
+    document.getElementById('report-status').innerHTML =
+      '<span style="color:var(--red)">파일을 선택하세요.</span>';
     return;
   }
-  document.getElementById('report-status').textContent = `파일 로드 중: ${file.name} (${reportType})`;
-  // Show a simple preview table with file metadata
-  const card = document.getElementById('report-table-card');
+  document.getElementById('report-status').textContent = '파일 로드 중...';
+  const fd = new FormData();
+  for (const f of inp.files) fd.append('files', f);
+  try {
+    const r = await fetch('/api/report/load', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.errors && d.errors.length) log('파일 오류:\n' + d.errors.join('\n'));
+    if (d.added && d.added.length)   log('모델 로드: ' + d.added.join(', '));
+    document.getElementById('report-status').innerHTML =
+      `<span style="color:var(--green)">✔ ${(d.added||[]).length}개 모델 로드됨</span>` +
+      (d.errors.length ? ` / <span style="color:var(--red)">${d.errors.length}개 오류</span>` : '');
+    _renderReportModelList(d.models || []);
+    await refreshReportTable();
+  } catch(e) {
+    log('파일 로드 오류: ' + e);
+  }
+}
+
+function _reportBadgeColor(idx) {
+  const palette = ['#4f8ef7','#f75f5f','#3dd68c','#f7c94f','#f7a14f','#c084fc','#67e8f9'];
+  return palette[idx % palette.length];
+}
+
+function _renderReportModelList(models) {
+  const el = document.getElementById('report-model-list');
+  if (!models.length) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:12px;">파일을 불러오면 모델이 표시됩니다.</span>';
+    _reportSelectedKey = null;
+    return;
+  }
+  el.innerHTML = models.map((m, i) => {
+    const key = `${m.brand}_${m.model}`;
+    const col = _reportBadgeColor(i);
+    const sel = key === _reportSelectedKey;
+    return `<span onclick="selectReportModel('${key}', this)" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;
+      padding:4px 10px;border-radius:4px;border:1px solid ${sel?col:'var(--border)'};
+      background:${sel?col+'22':'transparent'};font-size:12px;font-weight:600;color:${col};">
+      ● ${m.brand} ${m.model}
+    </span>`;
+  }).join('');
+}
+
+function selectReportModel(key, el) {
+  _reportSelectedKey = (_reportSelectedKey === key) ? null : key;
+  // 선택 스타일 갱신 (re-render)
+  fetch('/api/report/models').then(r => r.json()).then(d => _renderReportModelList(d.models || []));
+}
+
+async function deleteReportModel() {
+  if (!_reportSelectedKey) {
+    document.getElementById('report-status').innerHTML =
+      '<span style="color:var(--red)">삭제할 모델을 선택하세요 (배지 클릭).</span>';
+    return;
+  }
+  await fetch('/api/report/delete', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ key: _reportSelectedKey })
+  });
+  _reportSelectedKey = null;
+  const d = await (await fetch('/api/report/models')).json();
+  _renderReportModelList(d.models || []);
+  await refreshReportTable();
+  log('모델 삭제됨');
+}
+
+async function clearReportModels() {
+  await fetch('/api/report/clear', { method: 'POST' });
+  _reportSelectedKey = null;
+  _renderReportModelList([]);
+  document.getElementById('report-table-card').style.display = 'none';
+  document.getElementById('report-status').textContent = '전체 삭제됨';
+  log('보고서 모델 전체 삭제');
+}
+
+async function refreshReportTable() {
+  const fmt = document.getElementById('report-fmt').value;
+  try {
+    const r = await fetch(`/api/report/table?fmt=${fmt}`);
+    const d = await r.json();
+    if (!d.ok || !d.rows || !d.rows.length) {
+      document.getElementById('report-table-card').style.display = 'none';
+      return;
+    }
+    document.getElementById('report-table-card').style.display = '';
+    let html = `<table><thead><tr>${d.headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>`;
+    let lastSection = '';
+    d.rows.forEach(row => {
+      const isNewSection = row[0] !== lastSection;
+      lastSection = row[0];
+      html += '<tr>' + row.map((cell, ci) => {
+        const bg = (ci === 0 && isNewSection) ? 'background:#12151f;' : '';
+        return `<td style="${bg}">${cell}</td>`;
+      }).join('') + '</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('report-table-wrap').innerHTML = html;
+  } catch(e) {
+    log('테이블 로드 오류: ' + e);
+  }
+}
+
+function copyReportTable() {
   const wrap = document.getElementById('report-table-wrap');
-  card.style.display = 'block';
-  const typeLabel = reportType === 'competitor' ? '경쟁사 비교 장표' : '광학 측정 데이터';
-  const sizeMb = (file.size / 1024 / 1024).toFixed(2);
-  wrap.innerHTML = `
-    <table>
-      <tr><th>항목</th><th>내용</th></tr>
-      <tr><td>파일명</td><td>${file.name}</td></tr>
-      <tr><td>크기</td><td>${sizeMb} MB</td></tr>
-      <tr><td>형식</td><td>${typeLabel}</td></tr>
-      <tr><td>최종 수정</td><td>${new Date(file.lastModified).toLocaleString('ko-KR')}</td></tr>
-      <tr><td>상태</td><td><span style="color:var(--green)">✔ 로드 완료 (xlsx 파싱은 서버 연동 필요)</span></td></tr>
-    </table>`;
-  log(`보고서 템플릿 로드: ${file.name} [${typeLabel}]`);
-  document.getElementById('report-status').innerHTML = `<span style="color:var(--green)">✔ 파일 로드 완료: ${file.name}</span>`;
+  const rows = Array.from(wrap.querySelectorAll('tr'));
+  if (!rows.length) { log('복사할 테이블 없음'); return; }
+  const text = rows.map(tr =>
+    Array.from(tr.querySelectorAll('th,td')).map(c => c.textContent.trim()).join('\t')
+  ).join('\n');
+  navigator.clipboard.writeText(text).then(() => log('클립보드에 복사됨'));
+}
+
+function exportReportPpt() {
+  window.location.href = '/api/export/ppt';
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1368,6 +1739,14 @@ function _showAutoSavePath(path) {
 checkStatus();
 scanPorts();
 loadAutoSaveDir();
+_buildAutoAllGrid();
+// 보고서 모델 목록 복원 (페이지 새로고침 후에도 서버 메모리 유지)
+fetch('/api/report/models').then(r => r.json()).then(d => {
+  if (d.models && d.models.length) {
+    _renderReportModelList(d.models);
+    refreshReportTable();
+  }
+}).catch(() => {});
 
 // 센터 확인 버튼: 패턴 출력 후 활성화
 const _origRunSeq = runSeq;

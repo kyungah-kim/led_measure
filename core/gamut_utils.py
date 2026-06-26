@@ -115,10 +115,18 @@ def calc_gamut_stats(
     dci_overlap = (dci_inter_area / dci_area * 100.0) if dci_area > 0 else 0.0
     bt2020_overlap = (bt2020_inter_area / bt2020_area * 100.0) if bt2020_area > 0 else 0.0
 
+    # 측정 면적 기준 비율: meas_area / ref_area × 100
+    dci_area_ratio   = (meas_area / dci_area   * 100.0) if dci_area   > 0 else 0.0
+    bt2020_area_ratio = (meas_area / bt2020_area * 100.0) if bt2020_area > 0 else 0.0
+
     return {
-        "dci_overlap": round(dci_overlap, 2),
-        "bt2020_overlap": round(bt2020_overlap, 2),
-        "meas_area": meas_area,
-        "dci_area": dci_area,
-        "bt2020_area": bt2020_area,
+        "dci_overlap":      round(dci_overlap, 2),
+        "dci_inter_area":   round(dci_inter_area, 6),
+        "dci_area":         round(dci_area, 6),
+        "dci_area_ratio":   round(dci_area_ratio, 2),
+        "bt2020_overlap":   round(bt2020_overlap, 2),
+        "bt2020_inter_area": round(bt2020_inter_area, 6),
+        "bt2020_area":      round(bt2020_area, 6),
+        "bt2020_area_ratio": round(bt2020_area_ratio, 2),
+        "meas_area":        round(meas_area, 6),
     }

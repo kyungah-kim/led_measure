@@ -11,6 +11,8 @@ from .sequences.lum_swing import LumSwingSequence
 from .sequences.lum_loading import LumLoadingSequence
 from .sequences.gamut import GamutSequence
 from .sequences.contrast import ContrastSequence
+from .sequences.module_measure import ModuleMeasureSequence, DEFAULT_GAMMA_STEPS
+from .sequences.calman_sweep import CalmanSweepSequence, GAMUT_NAMES
 
 
 class MeasurementEngine:
@@ -41,7 +43,16 @@ class MeasurementEngine:
 
         self.meter: Optional[MeterBase] = None
         self.generator: Optional[GeneratorBase] = None
+        self.lg_tv_serial: Any = None   # LG TV 시리얼 (ConnectionPanel에서 열고, AutoAllPanel에서 사용)
+        self.lg_log_tx: Any = None      # LG 터미널 [TX] 로그 콜백 (CenterAlignPanel에서 설정)
         self.auto_save_dir: str = ""  # 공통 자동 저장 폴더 (연결 패널에서 설정)
+
+        # ── LG TV 장치 정보 (연결 시 luna 명령으로 자동 수집) ─────────────────────
+        self.lg_serial_number: str = ""
+        self.lg_sw_version: str = ""    # core_os_release
+        self.lg_sw_codename: str = ""   # core_os_release_codename
+        # UI 콜백: (brand, model) → ConnectionPanel이 설정, CenterAlignPanel에서 호출
+        self.on_lg_device_info: Optional[Callable[[str, str], None]] = None
 
         # ── 세션 데이터 (통합 파일 저장용) ──────────────────────────────────────
         # 앱 실행 중 모든 측정 결과를 누적 보관.  패널 _on_finished 때마다 갱신.
@@ -49,6 +60,7 @@ class MeasurementEngine:
         self.session_loading:  Dict[str, Any] = {}   # "SDR_Vivid" → {apl → results}
         self.session_gamut:    Dict[str, Any] = {}   # "SDR" / "HDR" → {color → result}
         self.session_contrast: Dict[str, Any] = {}   # "SDR" / "HDR" → {side → result}
+        self.session_key: str = ""  # "{brand}_{model}" of the model that owns session data
 
         # Shared lock for meter access across threads
         self.meter_lock = threading.Lock()
@@ -114,11 +126,13 @@ class MeasurementEngine:
             raise RuntimeError("Engine is not ready: meter or generator not connected")
 
         dispatch: Dict[str, Callable[..., Any]] = {
-            "center_align": self._run_center_align,
-            "lum_swing":    self._run_lum_swing,
-            "lum_loading":  self._run_lum_loading,
-            "gamut":        self._run_gamut,
-            "contrast":     self._run_contrast,
+            "center_align":   self._run_center_align,
+            "lum_swing":      self._run_lum_swing,
+            "lum_loading":    self._run_lum_loading,
+            "gamut":          self._run_gamut,
+            "contrast":       self._run_contrast,
+            "module_measure": self._run_module_measure,
+            "calman_sweep":   self._run_calman_sweep,
         }
         runner = dispatch.get(seq_name)
         if runner is None:
@@ -223,6 +237,43 @@ class MeasurementEngine:
         self.on_progress("gamut", 1.0, results)
         return results
 
+    def _run_module_measure(self, **kwargs: Any) -> Dict[str, Any]:
+        is_hdr: bool = kwargs.get("is_hdr", False)
+        gamma_channels: List[str] = kwargs.get("gamma_channels", ["W", "R", "G", "B"])
+        gamma_steps: List[int] = kwargs.get("gamma_steps", list(DEFAULT_GAMMA_STEPS))
+        ref_uv = kwargs.get("ref_uv", {})
+        run_gamma: bool = kwargs.get("run_gamma", True)
+        run_colors: bool = kwargs.get("run_colors", True)
+
+        gamma_count = len(gamma_channels) * len(gamma_steps) if run_gamma else 0
+        color_count = 7 if run_colors else 0
+        total = gamma_count + color_count
+        completed = [0]
+
+        seq = ModuleMeasureSequence(self)
+        self._current_seq = seq
+
+        def _cb(step_name: str, data: Any) -> None:
+            if step_name in ("gamma", "color"):
+                completed[0] += 1
+            pct = min(completed[0] / max(total, 1), 1.0)
+            self.on_progress(f"module_{step_name}", pct, data)
+
+        try:
+            result = seq.run(
+                is_hdr=is_hdr,
+                gamma_channels=gamma_channels,
+                gamma_steps=gamma_steps,
+                ref_uv=ref_uv,
+                callback=_cb,
+                run_gamma=run_gamma,
+                run_colors=run_colors,
+            )
+        finally:
+            self._current_seq = None
+        self.on_progress("module_measure", 1.0, result)
+        return result
+
     def _run_contrast(self, **kwargs: Any) -> Dict[float, MeasureResult]:
         is_hdr: bool = kwargs.get("is_hdr", False)
         user_callback: Callable = kwargs.get("callback", lambda s, r: None)
@@ -240,4 +291,31 @@ class MeasurementEngine:
 
         results = seq.run(is_hdr=is_hdr, callback=_cb)
         self.on_progress("contrast", 1.0, results)
+        return results
+
+    def _run_calman_sweep(self, **kwargs: Any) -> Dict[str, Any]:
+        from .sequences.calman_sweep import CalmanSweepSequence, COLOR_ORDER, SAT_LEVELS
+        is_hdr: bool = kwargs.get("is_hdr", False)
+        measured_colors: Dict[str, Any] = kwargs.get("measured_colors", {})
+
+        total = len(COLOR_ORDER) * len(SAT_LEVELS)
+        completed = [0]
+        seq = CalmanSweepSequence(self)
+        self._current_seq = seq
+
+        def _cb(color: str, sat: int, result: MeasureResult, de: float) -> None:
+            completed[0] += 1
+            pct = completed[0] / total
+            self.on_progress("calman_sweep", pct,
+                             {"color": color, "sat": sat, "result": result, "de76": de})
+
+        try:
+            results = seq.run(
+                is_hdr=is_hdr,
+                measured_colors=measured_colors,
+                callback=_cb,
+            )
+        finally:
+            self._current_seq = None
+        self.on_progress("calman_sweep", 1.0, results)
         return results

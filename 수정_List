@@ -1,0 +1,36 @@
+desk 버전
+	휘도 스윙에 테이블 보여지는 부분 세로 늘리기
+	자사모델은 Luna 적용해서  Full 자동화 돌리기
+	경쟁사모델은 모드 변환 최소 화 해서 자동화 돌리기 
+	
+	
+	 sdr vivid -> 휘도 스윙->luminance loading-> gamut->CR
+	 sdr standard ->휘도스윙->luminance laoding
+	 sdr cinema ->휘도스윙->luminance laoding
+	 hdr vivid -> 휘도 스윙->luminance loading
+	 hdr standard ->휘도스윙->luminance laoding
+	 hdr cinema ->휘도스윙->luminance laoding
+	 
+	   """luna-send -n 1 -f luna://com.webos.service.settingsservice/setSystemSettings '{"category":"picture","settings":{"energySaving":"off"}}'""",
+	   
+	   
+            luna-send -n 1 -f luna://com.webos.service.settingsservice/setSystemSettings '{"category":"aspectRatio","settings":{"arcPerApp":"original"}}'
+            
+            
+            """luna-send -n 1 -f luna://com.webos.service.settingsservice/setSystemSettings '{"category":"aspecRatio","settings":{"justScan":"on"}}'""",
+            
+            
+            Category	Item	TCL_65P7L	SS_65UH80_vivid	LG_QNED70_410	lg_mrg85
+Lum.	Vivid SDR 10% / 100%	429 / 428	262 / 262	—	913 / 615
+Lum.	Standard SDR 10% / 100%	92 / 342	270 / 271	—	622 / 521
+Lum.	Vivid HDR 10% / 100%	433 / 431	255 / 255	—	887 / 609
+Lum.	Standard HDR 10% / 100%	430 / 430	273 / 273	—	886 / 608
+Lum.	Cinema HDR 10% / 100%	374 / 374	291 / 291	—	885 / 608
+Contrast	Black (Ratio)	6232.9	5388.9	—	6293.5
+Color Gamut	DCI-P3 (%)	93.0	81.3	92.0	96.9
+Color Gamut	BT.2020 (%)	73.7	59.6	71.1	72.6
+
+
+262 / 262
+
+262 / 262

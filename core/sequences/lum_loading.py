@@ -8,19 +8,22 @@ from ..equipment.base import MeasureResult, PatternConfig, PatternInfo
 if TYPE_CHECKING:
     from ..engine import MeasurementEngine
 
-# APL step sets (percent values)
+# APL step sets (percent values) — all ordered 100 → smallest (descending pattern size)
 STEPS_37: List[int] = [
-    1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 14, 16, 18, 20,
-    23, 25, 28, 30, 33, 36, 39, 42, 46, 49, 53, 56, 60,
-    64, 68, 72, 77, 81, 86, 90, 95, 100,
+    100, 95, 90, 86, 81, 77, 72, 68, 64, 60, 56, 53, 49, 46, 42,
+    39, 36, 33, 30, 28, 25, 23, 20, 18, 16, 14, 12, 11, 10, 9, 8,
+    6, 5, 4, 3, 2, 1,
 ]
 
-STEPS_10: List[int] = [1, 3, 10, 16, 25, 36, 49, 64, 81, 100]
+STEPS_11: List[int] = [100, 81, 64, 49, 36, 25, 16, 10, 4, 3, 1]
 
-STEPS_2: List[int] = [10, 100]
+STEPS_10: List[int] = [100, 81, 64, 49, 36, 25, 16, 10, 3, 1]
+
+STEPS_2: List[int] = [100, 10]
 
 _STEP_VERSIONS: Dict[str, List[int]] = {
     "37": STEPS_37,
+    "11": STEPS_11,
     "10": STEPS_10,
     "2": STEPS_2,
 }

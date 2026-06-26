@@ -36,4 +36,6 @@ def create_app(brand: str = "", model_name: str = "") -> Flask:
 
 if __name__ == "__main__":
     flask_app = create_app()
-    flask_app.run(debug=True, host="0.0.0.0", port=5000, threaded=True)
+    # use_reloader=False: Flask 리로더가 파일 변경 시 프로세스를 재시작하면
+    # app.extensions["engine"] 이 초기화되어 Mock 연결이 끊기는 버그를 방지
+    flask_app.run(debug=True, host="0.0.0.0", port=5000, threaded=True, use_reloader=False)
